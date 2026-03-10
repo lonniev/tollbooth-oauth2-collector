@@ -9,6 +9,8 @@ This collector runs as a separate, unauthenticated FastMCP server that simply:
 1. Captures auth codes from browser redirects (GET /oauth/callback)
 2. Holds them briefly in Postgres (600s TTL)
 3. Serves them once to the originating MCP server (GET /oauth/retrieve)
+
+Uses Neon's SQL-over-HTTP API via httpx — no asyncpg or C extensions needed.
 """
 
 from __future__ import annotations
@@ -16,7 +18,9 @@ from __future__ import annotations
 import logging
 import os
 from typing import Any
+from urllib.parse import urlparse
 
+import httpx
 from fastmcp import FastMCP
 
 logger = logging.getLogger(__name__)
@@ -41,58 +45,71 @@ mcp = FastMCP(
 )
 
 # ---------------------------------------------------------------------------
-# Postgres helpers
+# Neon SQL-over-HTTP helpers
 # ---------------------------------------------------------------------------
 
-_pool = None
+_http_client: httpx.AsyncClient | None = None
+_neon_endpoint: str | None = None
+_schema_ensured = False
 
 
-async def _get_pool():
-    """Lazily create a connection pool."""
-    global _pool
-    if _pool is None:
-        import asyncpg
+async def _get_client() -> httpx.AsyncClient:
+    """Lazily create a persistent httpx client for Neon HTTP API."""
+    global _http_client, _neon_endpoint, _schema_ensured
 
+    if _http_client is None:
         database_url = os.environ.get("NEON_DATABASE_URL")
         if not database_url:
             raise RuntimeError("NEON_DATABASE_URL environment variable is required")
-        _pool = await asyncpg.create_pool(database_url, min_size=1, max_size=5)
+
+        parsed = urlparse(database_url)
+        _neon_endpoint = f"https://{parsed.hostname}/sql"
+
+        _http_client = httpx.AsyncClient(
+            headers={
+                "Neon-Connection-String": database_url,
+                "Content-Type": "application/json",
+            },
+            timeout=30.0,
+        )
+
+    if not _schema_ensured:
         await _ensure_schema()
-    return _pool
+        _schema_ensured = True
+
+    return _http_client
+
+
+async def _execute(query: str, params: list[Any] | None = None) -> dict[str, Any]:
+    """Execute a SQL statement via Neon's HTTP API."""
+    client = await _get_client()
+    body = {"query": query, "params": params or []}
+    resp = await client.post(_neon_endpoint, json=body)
+    resp.raise_for_status()
+    data = resp.json()
+
+    if isinstance(data, dict) and "message" in data and "rows" not in data:
+        raise RuntimeError(f"Neon SQL error: {data['message']}")
+
+    return data
 
 
 async def _ensure_schema():
     """Create the oauth_codes table if it doesn't exist."""
-    pool = _pool
-    if pool is None:
-        return
-    async with pool.acquire() as conn:
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS oauth_codes (
-                state TEXT PRIMARY KEY,
-                code TEXT NOT NULL,
-                received_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-        """)
+    await _execute("""
+        CREATE TABLE IF NOT EXISTS oauth_codes (
+            state TEXT PRIMARY KEY,
+            code TEXT NOT NULL,
+            received_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    """)
 
 
 async def _cleanup_expired():
     """Remove expired rows (older than TTL)."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "DELETE FROM oauth_codes WHERE received_at < NOW() - INTERVAL '$1 seconds'",
-            _TTL_SECONDS,
-        )
-
-
-async def _cleanup_expired_safe():
-    """Remove expired rows, parameterized via text interpolation for interval."""
-    pool = await _get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute(
-            f"DELETE FROM oauth_codes WHERE received_at < NOW() - INTERVAL '{_TTL_SECONDS} seconds'"
-        )
+    await _execute(
+        f"DELETE FROM oauth_codes WHERE received_at < NOW() - INTERVAL '{_TTL_SECONDS} seconds'"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -130,15 +147,12 @@ async def oauth_callback(request):
         return HTMLResponse(_ERROR_HTML, status_code=400)
 
     try:
-        pool = await _get_pool()
-        await _cleanup_expired_safe()
-        async with pool.acquire() as conn:
-            await conn.execute(
-                "INSERT INTO oauth_codes (state, code) VALUES ($1, $2) "
-                "ON CONFLICT (state) DO UPDATE SET code = $2, received_at = NOW()",
-                state,
-                code,
-            )
+        await _cleanup_expired()
+        await _execute(
+            "INSERT INTO oauth_codes (state, code) VALUES ($1, $2) "
+            "ON CONFLICT (state) DO UPDATE SET code = $2, received_at = NOW()",
+            [state, code],
+        )
         logger.info("Stored OAuth code for state=%s", state[:16])
         return HTMLResponse(_SUCCESS_HTML)
     except Exception:
@@ -159,18 +173,17 @@ async def oauth_retrieve(request):
         return JSONResponse({"error": "state parameter required"}, status_code=400)
 
     try:
-        pool = await _get_pool()
-        await _cleanup_expired_safe()
-        async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "DELETE FROM oauth_codes WHERE state = $1 RETURNING code", state
-            )
+        await _cleanup_expired()
+        result = await _execute(
+            "DELETE FROM oauth_codes WHERE state = $1 RETURNING code", [state]
+        )
 
-        if row is None:
+        rows = result.get("rows", [])
+        if not rows:
             return JSONResponse({"error": "not found or expired"}, status_code=404)
 
         logger.info("Retrieved and deleted OAuth code for state=%s", state[:16])
-        return JSONResponse({"code": row["code"]})
+        return JSONResponse({"code": rows[0]["code"]})
     except Exception:
         logger.exception("Failed to retrieve OAuth code")
         return JSONResponse({"error": "internal error"}, status_code=500)
@@ -185,10 +198,9 @@ async def oauth_retrieve(request):
 async def collector_status() -> dict[str, Any]:
     """Health check — shows the number of pending authorization codes and TTL."""
     try:
-        pool = await _get_pool()
-        await _cleanup_expired_safe()
-        async with pool.acquire() as conn:
-            count = await conn.fetchval("SELECT COUNT(*) FROM oauth_codes")
+        await _cleanup_expired()
+        result = await _execute("SELECT COUNT(*) AS cnt FROM oauth_codes")
+        count = result["rows"][0]["cnt"] if result.get("rows") else 0
         return {"status": "healthy", "pending_codes": count, "ttl_seconds": _TTL_SECONDS}
     except Exception as e:
         return {"status": "unhealthy", "error": str(e)}
