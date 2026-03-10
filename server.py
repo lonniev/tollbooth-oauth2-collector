@@ -11,6 +11,16 @@ This collector runs as a separate, unauthenticated FastMCP server that simply:
 3. Serves them once to the originating MCP server (GET /oauth/retrieve)
 
 Uses Neon's SQL-over-HTTP API via httpx — no asyncpg or C extensions needed.
+
+DPYC Identity
+~~~~~~~~~~~~~
+This service is registered as an **Advocate** in the DPYC Honor Chain.
+Peer MCP servers discover its URL via registry lookup
+(``resolve_service_by_name("tollbooth-oauth2-collector")``).
+
+Env var ``TOLLBOOTH_NOSTR_OPERATOR_NSEC`` holds the Nostr private key
+for this service's identity. It is used only during initial Oracle
+registration (a one-time step) and is not required at runtime.
 """
 
 from __future__ import annotations
