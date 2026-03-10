@@ -74,8 +74,8 @@ async def _get_client() -> httpx.AsyncClient:
         )
 
     if not _schema_ensured:
+        _schema_ensured = True  # Set before to prevent recursion via _execute
         await _ensure_schema()
-        _schema_ensured = True
 
     return _http_client
 
