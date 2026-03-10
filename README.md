@@ -39,13 +39,18 @@ fastmcp deploy server.py
 
 Set the `NEON_DATABASE_URL` environment variable in Horizon to point to your Neon Postgres instance.
 
-## Configuration for Consuming MCP Servers
+## DPYC Advocate Identity
 
-Set the `OAUTH_COLLECTOR_URL` environment variable in your MCP server to point to the deployed collector:
+This collector is registered as an **Advocate** in the [DPYC Honor Chain](https://github.com/lonniev/dpyc-community). Consuming MCP servers discover its URL automatically via the DPYC registry:
 
+```python
+from tollbooth.registry import resolve_service_by_name
+
+svc = await resolve_service_by_name("tollbooth-oauth2-collector")
+collector_url = svc["url"]  # e.g., "https://tollbooth-oauth2-collector.fastmcp.app"
 ```
-OAUTH_COLLECTOR_URL=https://tollbooth-oauth2-collector.fastmcp.app
-```
+
+No `OAUTH_COLLECTOR_URL` env var needed — peer discovery is handled by the registry.
 
 Register the collector's callback URL in your OAuth provider's developer portal:
 ```
