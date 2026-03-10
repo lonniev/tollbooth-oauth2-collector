@@ -15,6 +15,8 @@ Uses Neon's SQL-over-HTTP API via httpx — no asyncpg or C extensions needed.
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import logging
 import os
 from typing import Any
@@ -113,6 +115,23 @@ async def _cleanup_expired():
 
 
 # ---------------------------------------------------------------------------
+# Code encryption — codes are encrypted at rest using SHA-256(state) as key
+# ---------------------------------------------------------------------------
+
+
+def _encrypt_code(code: str, state: str) -> str:
+    """Encrypt an authorization code using the state token as key.
+
+    XOR with SHA-256(state) keystream, base64-encoded. The originating MCP
+    server decrypts with the same function (XOR is symmetric).
+    """
+    key = hashlib.sha256(state.encode()).digest()
+    code_bytes = code.encode()
+    encrypted = bytes(c ^ key[i % 32] for i, c in enumerate(code_bytes))
+    return base64.urlsafe_b64encode(encrypted).decode()
+
+
+# ---------------------------------------------------------------------------
 # HTTP Routes
 # ---------------------------------------------------------------------------
 
@@ -147,13 +166,14 @@ async def oauth_callback(request):
         return HTMLResponse(_ERROR_HTML, status_code=400)
 
     try:
+        encrypted_code = _encrypt_code(code, state)
         await _cleanup_expired()
         await _execute(
             "INSERT INTO oauth_codes (state, code) VALUES ($1, $2) "
             "ON CONFLICT (state) DO UPDATE SET code = $2, received_at = NOW()",
-            [state, code],
+            [state, encrypted_code],
         )
-        logger.info("Stored OAuth code for state=%s", state[:16])
+        logger.info("Stored encrypted OAuth code for state=%s", state[:16])
         return HTMLResponse(_SUCCESS_HTML)
     except Exception:
         logger.exception("Failed to store OAuth code")

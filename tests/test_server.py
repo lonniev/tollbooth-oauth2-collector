@@ -1,5 +1,6 @@
 """Tests for tollbooth-oauth2-collector server — mock Neon HTTP API, no real Postgres."""
 
+import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -36,8 +37,8 @@ class TestOAuthCallback:
     """Tests for the /oauth/callback route."""
 
     @pytest.mark.asyncio
-    async def test_callback_stores_code(self):
-        """Callback with code+state stores the code via Neon HTTP API."""
+    async def test_callback_stores_encrypted_code(self):
+        """Callback encrypts code before storing via Neon HTTP API."""
         mock_client = AsyncMock()
         mock_client.post.return_value = _mock_neon_response({"rows": [], "command": "INSERT"})
 
@@ -53,12 +54,17 @@ class TestOAuthCallback:
             resp = await server.oauth_callback(request)
             assert resp.status_code == 200
 
-            # Verify INSERT was called (second call after cleanup)
+            # Verify INSERT was called with encrypted (not plaintext) code
             insert_calls = [
                 call for call in mock_client.post.call_args_list
                 if "INSERT INTO oauth_codes" in str(call)
             ]
             assert len(insert_calls) >= 1
+
+            # Extract the params sent to Neon — code should NOT be plaintext
+            insert_body = insert_calls[0].kwargs.get("json") or insert_calls[0][1].get("json")
+            stored_code = insert_body["params"][1]
+            assert stored_code != "auth-code-xyz", "Code should be encrypted, not plaintext"
         finally:
             server._http_client = None
             server._neon_endpoint = None
@@ -260,4 +266,43 @@ class TestCollectorStatus:
             assert "NEON_DATABASE_URL" in result["error"]
 
 
-import os
+# ---------------------------------------------------------------------------
+# Encryption tests
+# ---------------------------------------------------------------------------
+
+
+class TestEncryption:
+    """Tests for code encryption at rest."""
+
+    def test_encrypt_produces_non_plaintext(self):
+        """Encrypted code differs from plaintext."""
+        from server import _encrypt_code
+
+        encrypted = _encrypt_code("auth-code-xyz", "state-token-123")
+        assert encrypted != "auth-code-xyz"
+
+    def test_encrypt_decrypt_roundtrip(self):
+        """XOR encryption is symmetric — same function decrypts."""
+        import base64
+        import hashlib
+
+        from server import _encrypt_code
+
+        code = "my-secret-auth-code-1234"
+        state = "nonce.hmac-signature"
+
+        encrypted_b64 = _encrypt_code(code, state)
+
+        # Decrypt with same XOR operation
+        key = hashlib.sha256(state.encode()).digest()
+        encrypted = base64.urlsafe_b64decode(encrypted_b64)
+        decrypted = bytes(c ^ key[i % 32] for i, c in enumerate(encrypted))
+        assert decrypted.decode() == code
+
+    def test_different_states_produce_different_ciphertext(self):
+        """Same code encrypted with different states produces different output."""
+        from server import _encrypt_code
+
+        enc1 = _encrypt_code("auth-code-xyz", "state-a")
+        enc2 = _encrypt_code("auth-code-xyz", "state-b")
+        assert enc1 != enc2
