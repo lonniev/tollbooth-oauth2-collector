@@ -155,10 +155,10 @@ async def oauth_callback(request):
         )
         logger.info("Stored OAuth code for state=%s", state[:16])
         return HTMLResponse(_SUCCESS_HTML)
-    except Exception:
+    except Exception as e:
         logger.exception("Failed to store OAuth code")
         return HTMLResponse(
-            "<html><body><h1>Internal Error</h1></body></html>",
+            f"<html><body><h1>Internal Error</h1><pre>{e}</pre></body></html>",
             status_code=500,
         )
 
@@ -184,9 +184,9 @@ async def oauth_retrieve(request):
 
         logger.info("Retrieved and deleted OAuth code for state=%s", state[:16])
         return JSONResponse({"code": rows[0]["code"]})
-    except Exception:
+    except Exception as e:
         logger.exception("Failed to retrieve OAuth code")
-        return JSONResponse({"error": "internal error"}, status_code=500)
+        return JSONResponse({"error": f"internal error: {e}"}, status_code=500)
 
 
 # ---------------------------------------------------------------------------
