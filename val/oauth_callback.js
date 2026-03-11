@@ -40,7 +40,26 @@ You can close this tab and return to your agentic app
 <p style="font-size:14px;color:#6b7280;margin:0">
 The originating MCP server will automatically pick up the code.</p>
 </div>
-<p style="font-size:12px;color:#9ca3af;margin-top:20px">
+<div style="margin-top:28px;padding:20px 24px;background:#fafbfc;
+border:1px solid #e5e7eb;border-radius:10px;text-align:center">
+<a href="https://github.com/lonniev/dpyc-community" style="text-decoration:none">
+<img src="https://raw.githubusercontent.com/lonniev/dpyc-community/main/assets/dpyc-logo.png"
+alt="DPYC Tollbooth" style="height:40px;margin-bottom:10px"></a>
+<p style="font-size:13px;line-height:1.5;color:#374151;margin:0 0 6px">
+Powered by <strong>DPYC Tollbooth</strong> &mdash;
+<em>Don&rsquo;t Pester Your Customer</em></p>
+<p style="font-size:12px;line-height:1.4;color:#6b7280;margin:0 0 8px">
+Pre-funded Lightning micropayments for AI tool calls.
+No credit cards. No KYC. No interruptions.</p>
+<p style="font-size:12px;color:#9ca3af;margin:0">
+<a href="https://github.com/lonniev/dpyc-community" style="color:#2563eb;
+text-decoration:none">Community</a> &middot;
+<a href="https://dpyc-oracle.fastmcp.app/mcp" style="color:#2563eb;
+text-decoration:none">Oracle</a> &middot;
+<a href="https://github.com/lonniev/dpyc-community/blob/main/CREED.md"
+style="color:#2563eb;text-decoration:none">Creed</a></p>
+</div>
+<p style="font-size:12px;color:#9ca3af;margin-top:16px">
 \uD83D\uDD12 The code is encrypted at rest and can only be decrypted by the
 requesting identity.</p>
 </body></html>`;
