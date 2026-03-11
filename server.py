@@ -175,18 +175,19 @@ _ERROR_HTML = (
     '<body style="font-family:system-ui,sans-serif;max-width:480px;margin:80px auto;'
     'text-align:center">'
     "<h1>Missing Parameters</h1>"
-    "<p>Both <code>code</code> and <code>state</code> query parameters are required.</p>"
+    "<p>Both <code>code</code> and <code>state</code> parameters are required.</p>"
     "</body></html>"
 )
 
 
-@mcp.custom_route("/oauth/callback", methods=["GET"])
+@mcp.custom_route("/oauth/callback", methods=["POST"])
 async def oauth_callback(request):
-    """Receive an OAuth2 authorization code from a browser redirect."""
+    """Receive an OAuth2 authorization code via form_post from the provider."""
     from starlette.responses import HTMLResponse
 
-    code = request.query_params.get("code")
-    state = request.query_params.get("state")
+    form = await request.form()
+    code = form.get("code") or request.query_params.get("code")
+    state = form.get("state") or request.query_params.get("state")
 
     if not code or not state:
         return HTMLResponse(_ERROR_HTML, status_code=400)
@@ -209,12 +210,13 @@ async def oauth_callback(request):
         )
 
 
-@mcp.custom_route("/oauth/retrieve", methods=["GET"])
+@mcp.custom_route("/oauth/retrieve", methods=["POST"])
 async def oauth_retrieve(request):
     """Retrieve a stored authorization code (one-time read)."""
     from starlette.responses import JSONResponse
 
-    state = request.query_params.get("state")
+    body = await request.json()
+    state = body.get("state")
     if not state:
         return JSONResponse({"error": "state parameter required"}, status_code=400)
 
