@@ -147,10 +147,26 @@ def _encrypt_code(code: str, state: str) -> str:
 
 _SUCCESS_HTML = (
     "<!DOCTYPE html><html><head><title>Authorization Code Received</title></head>"
-    '<body style="font-family:system-ui,sans-serif;max-width:480px;margin:80px auto;'
-    'text-align:center">'
-    "<h1>Authorization Code Received</h1>"
-    "<p>You can close this tab and return to your MCP client.</p>"
+    '<body style="font-family:system-ui,sans-serif;max-width:520px;margin:60px auto;'
+    "text-align:center;color:#1a1a1a;padding:0 20px\">"
+    '<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;'
+    'padding:40px 32px;box-shadow:0 1px 3px rgba(0,0,0,0.08)">'
+    '<div style="font-size:48px;margin-bottom:16px">\u2705</div>'
+    '<h1 style="font-size:22px;font-weight:600;margin:0 0 12px">'
+    "Authorization Code Received &amp; Saved</h1>"
+    '<p style="font-size:15px;line-height:1.5;color:#374151;margin:0 0 20px">'
+    "Your authorization code has been securely encrypted for your npub identity "
+    "and stored for retrieval.</p>"
+    '<hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0">'
+    '<p style="font-size:15px;line-height:1.5;color:#374151;margin:0 0 8px">'
+    "You can close this tab and return to your agentic app "
+    "(e.g.&nbsp;Claude&nbsp;Desktop, Claude&nbsp;Code).</p>"
+    '<p style="font-size:14px;color:#6b7280;margin:0">'
+    "The originating MCP server will automatically pick up the code.</p>"
+    "</div>"
+    '<p style="font-size:12px;color:#9ca3af;margin-top:20px">'
+    "\U0001f512 The code is encrypted at rest and can only be decrypted by the "
+    "requesting identity.</p>"
     "</body></html>"
 )
 
