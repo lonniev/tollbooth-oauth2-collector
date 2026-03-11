@@ -1,6 +1,6 @@
 [project]
 name = "tollbooth-oauth2-collector"
-version = "0.1.2"
+version = "0.2.0"
 description = "Unauthenticated OAuth2 callback collector for Tollbooth MCP services"
 authors = [{name = "Tollbooth OAuth2 Collector Contributors"}]
 readme = "README.md"

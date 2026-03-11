@@ -1,26 +1,30 @@
 """Tollbooth OAuth2 Collector — unauthenticated mailbox for OAuth2 authorization codes.
 
-Receives authorization codes from browser redirects and holds them for retrieval
-by the originating MCP server. Solves Horizon's auth-proxy problem: since
-Horizon enforces Bearer auth on ALL HTTP routes (including custom_route), OAuth
-providers cannot redirect browsers to an MCP server's callback endpoint.
+Receives authorization codes and holds them for retrieval by the
+originating MCP server.  Solves Horizon's routing constraint: Horizon
+only proxies ``/mcp/`` traffic (POST, MCP JSON-RPC) so browser GET
+redirects from OAuth providers cannot reach custom_route endpoints.
 
-This collector runs as a separate, unauthenticated FastMCP server that simply:
-1. Captures auth codes from browser redirects (GET /oauth/callback)
-2. Holds them briefly in Postgres (600s TTL)
-3. Serves them once to the originating MCP server (GET /oauth/retrieve)
+Architecture
+~~~~~~~~~~~~
+* A lightweight **serverless HTTP function** (Val Town) receives the
+  browser GET redirect from the OAuth provider and calls the collector's
+  ``store_code`` MCP tool via JSON-RPC over ``/mcp/``.
+* The originating MCP server calls ``retrieve_code`` (also an MCP tool)
+  to pick up the encrypted code (one-time read, auto-deleted).
 
-Uses Neon's SQL-over-HTTP API via httpx — no asyncpg or C extensions needed.
+The serverless callback source lives in ``val/oauth_callback.js`` in
+this repository.
+
+Uses Neon's SQL-over-HTTP API via httpx — no asyncpg or C extensions.
 
 DPYC Identity
 ~~~~~~~~~~~~~
 This service is registered as an **Advocate** in the DPYC Honor Chain.
 Peer MCP servers discover its URL via registry lookup
 (``resolve_service_by_name("tollbooth-oauth2-collector")``).
-
-Env var ``TOLLBOOTH_NOSTR_OPERATOR_NSEC`` holds the Nostr private key
-for this service's identity. It is used only during initial Oracle
-registration (a one-time step) and is not required at runtime.
+The browser callback URL is registered separately as
+``resolve_service_by_name("tollbooth-oauth2-callback")``.
 """
 
 from __future__ import annotations
@@ -37,7 +41,7 @@ from fastmcp import FastMCP
 
 logger = logging.getLogger(__name__)
 
-_TTL_SECONDS = 600  # 10 minutes — matches schwab-mcp _STATE_TTL_SECONDS
+_TTL_SECONDS = 600  # 10 minutes
 
 mcp = FastMCP(
     "Tollbooth OAuth2 Collector",
@@ -45,13 +49,17 @@ mcp = FastMCP(
         "Tollbooth OAuth2 Collector — unauthenticated mailbox for OAuth2 "
         "authorization codes. This is a community utility with no monetization.\n\n"
         "## How It Works\n\n"
-        "1. An MCP server (e.g., schwab-mcp) directs the user's browser to an "
-        "OAuth provider, with `redirect_uri` pointing to this collector.\n"
-        "2. After the user authorizes, the provider redirects the browser here "
-        "with `?code=...&state=...`.\n"
-        "3. The originating MCP server polls `GET /oauth/retrieve?state=...` "
-        "to pick up the code (one-time read, auto-deleted).\n\n"
+        "1. An MCP server directs the user's browser to an OAuth provider, with "
+        "`redirect_uri` pointing to the serverless callback function.\n"
+        "2. After the user authorizes, the provider redirects the browser to the "
+        "callback, which calls `store_code` on this collector via MCP.\n"
+        "3. The originating MCP server calls `retrieve_code(state=...)` to pick "
+        "up the encrypted code (one-time read, auto-deleted).\n\n"
         "## Tools\n\n"
+        "- `store_code` — Store an encrypted authorization code (called by the "
+        "serverless callback).\n"
+        "- `retrieve_code` — Retrieve and delete a stored code (called by the "
+        "originating MCP server).\n"
         "- `collector_status` — Health check showing pending code count and TTL."
     ),
 )
@@ -142,56 +150,24 @@ def _encrypt_code(code: str, state: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# HTTP Routes
+# MCP Tools
 # ---------------------------------------------------------------------------
 
-_SUCCESS_HTML = (
-    "<!DOCTYPE html><html><head><title>Authorization Code Received</title></head>"
-    '<body style="font-family:system-ui,sans-serif;max-width:520px;margin:60px auto;'
-    "text-align:center;color:#1a1a1a;padding:0 20px\">"
-    '<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;'
-    'padding:40px 32px;box-shadow:0 1px 3px rgba(0,0,0,0.08)">'
-    '<div style="font-size:48px;margin-bottom:16px">\u2705</div>'
-    '<h1 style="font-size:22px;font-weight:600;margin:0 0 12px">'
-    "Authorization Code Received &amp; Saved</h1>"
-    '<p style="font-size:15px;line-height:1.5;color:#374151;margin:0 0 20px">'
-    "Your authorization code has been securely encrypted for your npub identity "
-    "and stored for retrieval.</p>"
-    '<hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0">'
-    '<p style="font-size:15px;line-height:1.5;color:#374151;margin:0 0 8px">'
-    "You can close this tab and return to your agentic app "
-    "(e.g.&nbsp;Claude&nbsp;Desktop, Claude&nbsp;Code).</p>"
-    '<p style="font-size:14px;color:#6b7280;margin:0">'
-    "The originating MCP server will automatically pick up the code.</p>"
-    "</div>"
-    '<p style="font-size:12px;color:#9ca3af;margin-top:20px">'
-    "\U0001f512 The code is encrypted at rest and can only be decrypted by the "
-    "requesting identity.</p>"
-    "</body></html>"
-)
 
-_ERROR_HTML = (
-    "<!DOCTYPE html><html><head><title>Error</title></head>"
-    '<body style="font-family:system-ui,sans-serif;max-width:480px;margin:80px auto;'
-    'text-align:center">'
-    "<h1>Missing Parameters</h1>"
-    "<p>Both <code>code</code> and <code>state</code> parameters are required.</p>"
-    "</body></html>"
-)
+@mcp.tool()
+async def store_code(code: str, state: str) -> dict[str, Any]:
+    """Store an encrypted OAuth2 authorization code.
 
+    Called by the serverless callback function after the browser redirect.
+    The code is encrypted with SHA-256(state) before storage.
 
-@mcp.custom_route("/oauth/callback", methods=["POST"])
-async def oauth_callback(request):
-    """Receive an OAuth2 authorization code via form_post from the provider."""
-    from starlette.responses import HTMLResponse
+    Args:
+        code: The authorization code from the OAuth provider.
+        state: The state token (patron npub) from the authorization request.
 
-    form = await request.form()
-    code = form.get("code") or request.query_params.get("code")
-    state = form.get("state") or request.query_params.get("state")
-
-    if not code or not state:
-        return HTMLResponse(_ERROR_HTML, status_code=400)
-
+    Returns:
+        Dict with ``success`` key and a message.
+    """
     try:
         encrypted_code = _encrypt_code(code, state)
         await _cleanup_expired()
@@ -201,25 +177,26 @@ async def oauth_callback(request):
             [state, encrypted_code],
         )
         logger.info("Stored encrypted OAuth code for state=%s", state[:16])
-        return HTMLResponse(_SUCCESS_HTML)
-    except Exception:
+        return {"success": True, "message": "Code stored successfully."}
+    except Exception as e:
         logger.exception("Failed to store OAuth code")
-        return HTMLResponse(
-            "<html><body><h1>Internal Error</h1></body></html>",
-            status_code=500,
-        )
+        return {"success": False, "error": str(e)}
 
 
-@mcp.custom_route("/oauth/retrieve", methods=["POST"])
-async def oauth_retrieve(request):
-    """Retrieve a stored authorization code (one-time read)."""
-    from starlette.responses import JSONResponse
+@mcp.tool()
+async def retrieve_code(state: str) -> dict[str, Any]:
+    """Retrieve a stored authorization code (one-time read, auto-deleted).
 
-    body = await request.json()
-    state = body.get("state")
-    if not state:
-        return JSONResponse({"error": "state parameter required"}, status_code=400)
+    Called by the originating MCP server to pick up the code after the user
+    has authorized in the browser. Returns the encrypted code which the
+    caller decrypts using the same state token.
 
+    Args:
+        state: The state token (patron npub) used during authorization.
+
+    Returns:
+        Dict with ``code`` (encrypted) on success, or ``error`` if not found.
+    """
     try:
         await _cleanup_expired()
         result = await _execute(
@@ -228,18 +205,13 @@ async def oauth_retrieve(request):
 
         rows = result.get("rows", [])
         if not rows:
-            return JSONResponse({"error": "not found or expired"}, status_code=404)
+            return {"found": False, "error": "not found or expired"}
 
         logger.info("Retrieved and deleted OAuth code for state=%s", state[:16])
-        return JSONResponse({"code": rows[0]["code"]})
-    except Exception:
+        return {"found": True, "code": rows[0]["code"]}
+    except Exception as e:
         logger.exception("Failed to retrieve OAuth code")
-        return JSONResponse({"error": "internal error"}, status_code=500)
-
-
-# ---------------------------------------------------------------------------
-# MCP Tool
-# ---------------------------------------------------------------------------
+        return {"found": False, "error": str(e)}
 
 
 @mcp.tool()
