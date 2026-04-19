@@ -133,20 +133,22 @@ async def _cleanup_expired():
 
 
 # ---------------------------------------------------------------------------
-# Code encryption — codes are encrypted at rest using SHA-256(state) as key
+# Code encryption — AES-256-GCM with random IV, keyed on SHA-256(state)
 # ---------------------------------------------------------------------------
 
 
 def _encrypt_code(code: str, state: str) -> str:
-    """Encrypt an authorization code using the state token as key.
+    """Encrypt an authorization code using AES-256-GCM.
 
-    XOR with SHA-256(state) keystream, base64-encoded. The originating MCP
-    server decrypts with the same function (XOR is symmetric).
+    Key: SHA-256(state). IV: 12 random bytes prepended to ciphertext.
+    The originating MCP server decrypts with the matching function.
     """
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
     key = hashlib.sha256(state.encode()).digest()
-    code_bytes = code.encode()
-    encrypted = bytes(c ^ key[i % 32] for i, c in enumerate(code_bytes))
-    return base64.urlsafe_b64encode(encrypted).decode()
+    iv = os.urandom(12)
+    aes = AESGCM(key)
+    ct = aes.encrypt(iv, code.encode(), None)
+    return base64.urlsafe_b64encode(iv + ct).decode()
 
 
 # ---------------------------------------------------------------------------
