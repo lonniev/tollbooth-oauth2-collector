@@ -2,7 +2,7 @@
  * Tollbooth OAuth2 Callback — serverless GET handler for OAuth provider redirects.
  *
  * Deployed as a Val Town HTTP val at:
- *   https://tollbooth-oauth2-callback-serverless.web.val.run
+ *   https://tollbooth-dpyc-oauth.val.run
  *
  * This function receives the browser GET redirect from an OAuth provider
  * (e.g., Schwab, Google) with ?code=...&state=... query parameters, then
