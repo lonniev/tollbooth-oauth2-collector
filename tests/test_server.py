@@ -1,4 +1,9 @@
-"""Tests for tollbooth-oauth2-collector server — mock Neon HTTP API, no real Postgres."""
+"""Tests for tollbooth-oauth2-collector server.
+
+Mocks Neon's SQL-over-HTTP API so no real Postgres is required. Targets the
+current MCP-tool surface (`store_code`, `retrieve_code`, `collector_status`)
+and the AES-256-GCM `_encrypt_code` primitive.
+"""
 
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -11,14 +16,6 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
-def _mock_request(params: dict, headers: dict | None = None):
-    """Create a mock Starlette Request."""
-    req = MagicMock()
-    req.query_params = params
-    req.headers = headers or {}
-    return req
-
-
 def _mock_neon_response(data: dict, status_code: int = 200):
     """Create a mock httpx Response matching Neon HTTP API format."""
     resp = MagicMock()
@@ -28,216 +25,195 @@ def _mock_neon_response(data: dict, status_code: int = 200):
     return resp
 
 
+def _install_mock_client(server_module, side_effect=None, return_value=None):
+    """Wire a mock httpx.AsyncClient into the server module's globals.
+
+    Bypasses _get_client's lazy initialization (which would otherwise require
+    NEON_DATABASE_URL to be set in the environment).
+    """
+    mock_client = AsyncMock()
+    if side_effect is not None:
+        mock_client.post.side_effect = side_effect
+    elif return_value is not None:
+        mock_client.post.return_value = return_value
+    server_module._http_client = mock_client
+    server_module._neon_endpoint = "https://test.neon.tech/sql"
+    server_module._schema_ensured = True
+    return mock_client
+
+
+def _reset_server_state(server_module):
+    """Tear down the mock client wiring so other tests start clean."""
+    server_module._http_client = None
+    server_module._neon_endpoint = None
+    server_module._schema_ensured = False
+
+
 # ---------------------------------------------------------------------------
-# /oauth/callback tests
+# store_code tests
 # ---------------------------------------------------------------------------
 
 
-class TestOAuthCallback:
-    """Tests for the /oauth/callback route."""
+class TestStoreCode:
+    """Tests for the `store_code` MCP tool."""
 
     @pytest.mark.asyncio
-    async def test_callback_stores_encrypted_code(self):
-        """Callback encrypts code before storing via Neon HTTP API."""
-        mock_client = AsyncMock()
-        mock_client.post.return_value = _mock_neon_response({"rows": [], "command": "INSERT"})
-
-        request = _mock_request({"code": "auth-code-xyz", "state": "nonce.sig"})
-
+    async def test_store_code_encrypts_before_persisting(self):
+        """The plaintext code never reaches Neon — the INSERT params must
+        contain ciphertext, not the raw authorization code."""
         import server
 
-        server._http_client = mock_client
-        server._neon_endpoint = "https://test.neon.tech/sql"
-        server._schema_ensured = True
+        mock_client = _install_mock_client(
+            server, return_value=_mock_neon_response({"rows": [], "command": "INSERT"})
+        )
 
         try:
-            resp = await server.oauth_callback(request)
-            assert resp.status_code == 200
+            result = await server.store_code(code="auth-code-xyz", state="state-token-123")
+            assert result["success"] is True
 
-            # Verify INSERT was called with encrypted (not plaintext) code
             insert_calls = [
                 call for call in mock_client.post.call_args_list
                 if "INSERT INTO oauth_codes" in str(call)
             ]
             assert len(insert_calls) >= 1
 
-            # Extract the params sent to Neon — code should NOT be plaintext
-            insert_body = insert_calls[0].kwargs.get("json") or insert_calls[0][1].get("json")
-            stored_code = insert_body["params"][1]
-            assert stored_code != "auth-code-xyz", "Code should be encrypted, not plaintext"
+            body = insert_calls[0].kwargs.get("json")
+            stored_code = body["params"][1]
+            assert stored_code != "auth-code-xyz", \
+                "Code must be encrypted, not stored as plaintext"
         finally:
-            server._http_client = None
-            server._neon_endpoint = None
-            server._schema_ensured = False
+            _reset_server_state(server)
 
     @pytest.mark.asyncio
-    async def test_callback_missing_code(self):
-        """Callback returns 400 when code is missing."""
-        request = _mock_request({"state": "nonce.sig"})
-
+    async def test_store_code_runs_cleanup_first(self):
+        """The cleanup DELETE runs before the INSERT so expired rows are
+        purged on every store."""
         import server
 
-        resp = await server.oauth_callback(request)
-        assert resp.status_code == 400
-
-    @pytest.mark.asyncio
-    async def test_callback_missing_state(self):
-        """Callback returns 400 when state is missing."""
-        request = _mock_request({"code": "auth-code-xyz"})
-
-        import server
-
-        resp = await server.oauth_callback(request)
-        assert resp.status_code == 400
-
-    @pytest.mark.asyncio
-    async def test_callback_missing_both(self):
-        """Callback returns 400 when both params are missing."""
-        request = _mock_request({})
-
-        import server
-
-        resp = await server.oauth_callback(request)
-        assert resp.status_code == 400
-
-
-# ---------------------------------------------------------------------------
-# /oauth/retrieve tests
-# ---------------------------------------------------------------------------
-
-
-class TestOAuthRetrieve:
-    """Tests for the /oauth/retrieve route."""
-
-    @pytest.mark.asyncio
-    async def test_retrieve_returns_and_deletes(self):
-        """Retrieve returns the code from Neon DELETE RETURNING."""
-        mock_client = AsyncMock()
-        # cleanup returns empty, then DELETE RETURNING returns the code
-        mock_client.post.side_effect = [
-            _mock_neon_response({"rows": [], "command": "DELETE"}),  # cleanup
-            _mock_neon_response({"rows": [{"code": "auth-code-xyz"}], "command": "DELETE"}),
-        ]
-
-        request = _mock_request({"state": "nonce.sig"})
-
-        import server
-
-        server._http_client = mock_client
-        server._neon_endpoint = "https://test.neon.tech/sql"
-        server._schema_ensured = True
-
-        try:
-            resp = await server.oauth_retrieve(request)
-            assert resp.status_code == 200
-
-            import json
-
-            body = json.loads(resp.body.decode())
-            assert body["code"] == "auth-code-xyz"
-        finally:
-            server._http_client = None
-            server._neon_endpoint = None
-            server._schema_ensured = False
-
-    @pytest.mark.asyncio
-    async def test_retrieve_not_found(self):
-        """Retrieve returns 404 for unknown state."""
-        mock_client = AsyncMock()
-        mock_client.post.side_effect = [
-            _mock_neon_response({"rows": [], "command": "DELETE"}),  # cleanup
-            _mock_neon_response({"rows": [], "command": "DELETE"}),  # not found
-        ]
-
-        request = _mock_request({"state": "unknown.state"})
-
-        import server
-
-        server._http_client = mock_client
-        server._neon_endpoint = "https://test.neon.tech/sql"
-        server._schema_ensured = True
-
-        try:
-            resp = await server.oauth_retrieve(request)
-            assert resp.status_code == 404
-        finally:
-            server._http_client = None
-            server._neon_endpoint = None
-            server._schema_ensured = False
-
-    @pytest.mark.asyncio
-    async def test_retrieve_missing_state(self):
-        """Retrieve returns 400 when state param is missing."""
-        request = _mock_request({})
-
-        import server
-
-        resp = await server.oauth_retrieve(request)
-        assert resp.status_code == 400
-
-
-# ---------------------------------------------------------------------------
-# Cleanup tests
-# ---------------------------------------------------------------------------
-
-
-class TestCleanup:
-    """Tests for expired entry cleanup."""
-
-    @pytest.mark.asyncio
-    async def test_expired_entries_cleaned_on_callback(self):
-        """Cleanup DELETE runs during callback handling."""
-        mock_client = AsyncMock()
-        mock_client.post.return_value = _mock_neon_response(
-            {"rows": [], "command": "DELETE"}
+        mock_client = _install_mock_client(
+            server, return_value=_mock_neon_response({"rows": [], "command": "DELETE"})
         )
 
-        request = _mock_request({"code": "code123", "state": "state456"})
-
-        import server
-
-        server._http_client = mock_client
-        server._neon_endpoint = "https://test.neon.tech/sql"
-        server._schema_ensured = True
-
         try:
-            await server.oauth_callback(request)
-
-            # The cleanup query should have been called
+            await server.store_code(code="c", state="s")
             cleanup_calls = [
-                call
-                for call in mock_client.post.call_args_list
+                call for call in mock_client.post.call_args_list
                 if "DELETE FROM oauth_codes WHERE received_at" in str(call)
             ]
             assert len(cleanup_calls) >= 1
         finally:
-            server._http_client = None
-            server._neon_endpoint = None
-            server._schema_ensured = False
+            _reset_server_state(server)
+
+    @pytest.mark.asyncio
+    async def test_store_code_returns_error_on_db_failure(self):
+        """If Neon raises, the tool returns success=False with an error
+        message rather than propagating the exception."""
+        import server
+
+        mock_client = AsyncMock()
+        mock_client.post.side_effect = RuntimeError("Neon unreachable")
+        server._http_client = mock_client
+        server._neon_endpoint = "https://test.neon.tech/sql"
+        server._schema_ensured = True
+
+        try:
+            result = await server.store_code(code="c", state="s")
+            assert result["success"] is False
+            assert "Neon unreachable" in result["error"]
+        finally:
+            _reset_server_state(server)
 
 
 # ---------------------------------------------------------------------------
-# collector_status tool tests
+# retrieve_code tests
+# ---------------------------------------------------------------------------
+
+
+class TestRetrieveCode:
+    """Tests for the `retrieve_code` MCP tool — one-time read with delete."""
+
+    @pytest.mark.asyncio
+    async def test_retrieve_returns_stored_code(self):
+        """DELETE ... RETURNING surfaces the encrypted code to the caller."""
+        import server
+
+        _install_mock_client(server, side_effect=[
+            _mock_neon_response({"rows": [], "command": "DELETE"}),  # cleanup
+            _mock_neon_response(
+                {"rows": [{"code": "ENCRYPTED_BLOB"}], "command": "DELETE"}
+            ),
+        ])
+
+        try:
+            result = await server.retrieve_code(state="state-token-123")
+            assert result["found"] is True
+            assert result["code"] == "ENCRYPTED_BLOB"
+        finally:
+            _reset_server_state(server)
+
+    @pytest.mark.asyncio
+    async def test_retrieve_uses_delete_returning(self):
+        """The retrieve path issues a DELETE ... RETURNING — it is a
+        one-time read; a subsequent retrieve_code for the same state finds
+        nothing."""
+        import server
+
+        _install_mock_client(server, side_effect=[
+            _mock_neon_response({"rows": [], "command": "DELETE"}),  # cleanup
+            _mock_neon_response(
+                {"rows": [{"code": "BLOB"}], "command": "DELETE"}
+            ),
+        ])
+        mock_client = server._http_client
+
+        try:
+            await server.retrieve_code(state="s")
+            delete_returning = [
+                call for call in mock_client.post.call_args_list
+                if "DELETE FROM oauth_codes WHERE state" in str(call)
+                and "RETURNING code" in str(call)
+            ]
+            assert len(delete_returning) >= 1
+        finally:
+            _reset_server_state(server)
+
+    @pytest.mark.asyncio
+    async def test_retrieve_not_found_returns_found_false(self):
+        """An unknown state returns found=False with an error string,
+        not an exception."""
+        import server
+
+        _install_mock_client(server, side_effect=[
+            _mock_neon_response({"rows": [], "command": "DELETE"}),  # cleanup
+            _mock_neon_response({"rows": [], "command": "DELETE"}),  # not found
+        ])
+
+        try:
+            result = await server.retrieve_code(state="unknown.state")
+            assert result["found"] is False
+            assert "not found" in result["error"]
+        finally:
+            _reset_server_state(server)
+
+
+# ---------------------------------------------------------------------------
+# collector_status tests
 # ---------------------------------------------------------------------------
 
 
 class TestCollectorStatus:
-    """Tests for the collector_status MCP tool."""
+    """Tests for the `collector_status` MCP tool."""
 
     @pytest.mark.asyncio
-    async def test_returns_healthy_status(self):
-        """collector_status returns healthy with pending count."""
-        mock_client = AsyncMock()
-        mock_client.post.side_effect = [
-            _mock_neon_response({"rows": [], "command": "DELETE"}),  # cleanup
-            _mock_neon_response({"rows": [{"cnt": 3}], "command": "SELECT"}),  # count
-        ]
-
+    async def test_returns_healthy_with_pending_count(self):
+        """When DB is reachable, status='healthy' with the live row count
+        and the static TTL."""
         import server
 
-        server._http_client = mock_client
-        server._neon_endpoint = "https://test.neon.tech/sql"
-        server._schema_ensured = True
+        _install_mock_client(server, side_effect=[
+            _mock_neon_response({"rows": [], "command": "DELETE"}),  # cleanup
+            _mock_neon_response({"rows": [{"cnt": 3}], "command": "SELECT"}),
+        ])
 
         try:
             result = await server.collector_status()
@@ -245,21 +221,15 @@ class TestCollectorStatus:
             assert result["pending_codes"] == 3
             assert result["ttl_seconds"] == 600
         finally:
-            server._http_client = None
-            server._neon_endpoint = None
-            server._schema_ensured = False
+            _reset_server_state(server)
 
     @pytest.mark.asyncio
-    async def test_returns_unhealthy_on_error(self):
-        """collector_status returns unhealthy when DB is unreachable."""
+    async def test_returns_unhealthy_when_neon_url_missing(self):
+        """No NEON_DATABASE_URL → unhealthy with that name in the error."""
         import server
-
-        server._http_client = None
-        server._neon_endpoint = None
-        server._schema_ensured = False
+        _reset_server_state(server)
 
         with patch.dict(os.environ, {}, clear=False):
-            # Remove NEON_DATABASE_URL if set
             os.environ.pop("NEON_DATABASE_URL", None)
             result = await server.collector_status()
             assert result["status"] == "unhealthy"
@@ -272,19 +242,24 @@ class TestCollectorStatus:
 
 
 class TestEncryption:
-    """Tests for code encryption at rest."""
+    """Tests for `_encrypt_code` — AES-256-GCM with SHA-256(state) as the key
+    and a 12-byte random IV prepended to the ciphertext."""
 
     def test_encrypt_produces_non_plaintext(self):
-        """Encrypted code differs from plaintext."""
+        """Encrypted output differs from plaintext."""
         from server import _encrypt_code
 
         encrypted = _encrypt_code("auth-code-xyz", "state-token-123")
         assert encrypted != "auth-code-xyz"
 
     def test_encrypt_decrypt_roundtrip(self):
-        """XOR encryption is symmetric — same function decrypts."""
+        """AES-256-GCM with SHA-256(state) decrypts the ciphertext that
+        _encrypt_code produced. Mirrors what the originating MCP server
+        does when it retrieves the code."""
         import base64
         import hashlib
+
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
         from server import _encrypt_code
 
@@ -293,16 +268,30 @@ class TestEncryption:
 
         encrypted_b64 = _encrypt_code(code, state)
 
-        # Decrypt with same XOR operation
+        raw = base64.urlsafe_b64decode(encrypted_b64)
+        iv, ct = raw[:12], raw[12:]
         key = hashlib.sha256(state.encode()).digest()
-        encrypted = base64.urlsafe_b64decode(encrypted_b64)
-        decrypted = bytes(c ^ key[i % 32] for i, c in enumerate(encrypted))
+        decrypted = AESGCM(key).decrypt(iv, ct, None)
+
         assert decrypted.decode() == code
 
     def test_different_states_produce_different_ciphertext(self):
-        """Same code encrypted with different states produces different output."""
+        """Same code under two different state tokens yields distinct
+        ciphertexts (different keys + random IVs make repetition statistically
+        impossible)."""
         from server import _encrypt_code
 
         enc1 = _encrypt_code("auth-code-xyz", "state-a")
         enc2 = _encrypt_code("auth-code-xyz", "state-b")
         assert enc1 != enc2
+
+    def test_same_state_same_code_produces_different_ciphertext(self):
+        """Even with identical inputs, a fresh random IV makes each call
+        produce different ciphertext — defends against IV-reuse attacks
+        on AES-GCM."""
+        from server import _encrypt_code
+
+        enc1 = _encrypt_code("auth-code-xyz", "state-a")
+        enc2 = _encrypt_code("auth-code-xyz", "state-a")
+        assert enc1 != enc2, \
+            "IV must be random per call; identical ciphertext indicates IV reuse"
