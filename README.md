@@ -41,7 +41,7 @@ Set the `NEON_DATABASE_URL` environment variable in Horizon to point to your Neo
 
 ## DPYC Advocate Identity
 
-This collector is registered as an **Advocate** in the [DPYC Honor Chain](https://github.com/lonniev/dpyc-community). Consuming MCP servers discover its URL automatically via the DPYC registry:
+This collector is registered as an **Advocate** in the [DPYC Social Contract](https://github.com/lonniev/dpyc-community). Consuming MCP servers discover its URL automatically via the DPYC registry:
 
 ```python
 from tollbooth.registry import resolve_service_by_name
@@ -69,12 +69,20 @@ https://tollbooth-oauth2-collector.fastmcp.app/oauth/callback
 
 | Repository | Description |
 |---|---|
-| [dpyc-community](https://github.com/lonniev/dpyc-community) | DPYC Honor Chain registry and governance |
 | [tollbooth-dpyc](https://github.com/lonniev/tollbooth-dpyc) | Python SDK for Tollbooth monetization |
-| [tollbooth-authority](https://github.com/lonniev/tollbooth-authority) | Authority MCP service |
+| [dpyc-community](https://github.com/lonniev/dpyc-community) | DPYC Social Contract registry and governance |
+| [dpyc-oracle](https://github.com/lonniev/dpyc-oracle) | Free community concierge — membership, governance, onboarding |
+| [tollbooth-authority](https://github.com/lonniev/tollbooth-authority) | Certification Authority MCP service |
+| [tollbooth-sample](https://github.com/lonniev/tollbooth-sample) | Reference Operator implementation / template |
+| [tollbooth-pricing-studio](https://github.com/lonniev/tollbooth-pricing-studio) | iOS pricing editor for Operators |
+| [cypher-mcp](https://github.com/lonniev/cypher-mcp) | Monetized graph answers — named Cypher over Neo4j/AuraDB |
 | [schwab-mcp](https://github.com/lonniev/schwab-mcp) | Schwab brokerage MCP server |
-| [thebrain-mcp](https://github.com/lonniev/thebrain-mcp) | Personal Brain MCP server |
+| [thebrain-mcp](https://github.com/lonniev/thebrain-mcp) | Personal Brain knowledge-graph MCP server |
 | [excalibur-mcp](https://github.com/lonniev/excalibur-mcp) | X (Twitter) posting MCP server |
+| [taxsort-mcp](https://github.com/lonniev/taxsort-mcp) | Tax sorting and classification MCP server |
+| [optionality-mcp](https://github.com/lonniev/optionality-mcp) | Options analytics MCP server |
+| [tollbooth-oauth2-collector](https://github.com/lonniev/tollbooth-oauth2-collector) | OAuth2 callback collector (Advocate) |
+| [tollbooth-shortlinks](https://github.com/lonniev/tollbooth-shortlinks) | URL shortener utility Operator |
 
 ## License
 
