@@ -1,10 +1,10 @@
 [project]
 name = "tollbooth-oauth2-collector"
-version = "0.2.2"
+version = "0.2.3"
 description = "Unauthenticated OAuth2 callback collector for Tollbooth MCP services"
 authors = [{name = "Tollbooth OAuth2 Collector Contributors"}]
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = {text = "Apache-2.0"}
 keywords = ["mcp", "oauth2", "callback", "tollbooth", "fastmcp"]
 
@@ -12,6 +12,9 @@ dependencies = [
     "fastmcp>=2.0.0",
     "httpx>=0.27.0",
     "cryptography>=46.0.5",
+    # Single source of the collector auth-code crypto contract
+    # (encrypt_collector_code / decrypt_collector_code — encrypt added in 0.62.1).
+    "tollbooth-dpyc>=0.62.1",
 ]
 
 [project.optional-dependencies]

@@ -29,8 +29,6 @@ The browser callback URL is registered separately as
 
 from __future__ import annotations
 
-import base64
-import hashlib
 import logging
 import os
 from typing import Any
@@ -140,15 +138,13 @@ async def _cleanup_expired():
 def _encrypt_code(code: str, state: str) -> str:
     """Encrypt an authorization code using AES-256-GCM.
 
-    Key: SHA-256(state). IV: 12 random bytes prepended to ciphertext.
-    The originating MCP server decrypts with the matching function.
+    Delegates to the SDK's canonical ``encrypt_collector_code`` — the single
+    source of this contract, whose peer ``decrypt_collector_code`` the
+    originating MCP server uses. Keeping both halves in tollbooth-dpyc stops the
+    collector and the servers from drifting apart on key derivation or framing.
     """
-    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-    key = hashlib.sha256(state.encode()).digest()
-    iv = os.urandom(12)
-    aes = AESGCM(key)
-    ct = aes.encrypt(iv, code.encode(), None)
-    return base64.urlsafe_b64encode(iv + ct).decode()
+    from tollbooth.oauth2_collector import encrypt_collector_code
+    return encrypt_collector_code(code, state)
 
 
 # ---------------------------------------------------------------------------

@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.3] — 2026-07-09
+
+- refactor: `_encrypt_code` now delegates to the SDK's canonical `encrypt_collector_code` — the peer of `decrypt_collector_code`. Both halves of the auth-code crypto contract now live in `tollbooth-dpyc`, so the collector and the MCP servers that decrypt can't drift on key derivation or framing.
+- deps: add `tollbooth-dpyc>=0.62.1` (introduces `encrypt_collector_code`).
+- build: raise `requires-python` to `>=3.12` to match the SDK's floor.
+
 ## [0.2.2] — 2026-05-13
 
 - security: encrypt OAuth authorization codes with **AES-256-GCM**, replacing the prior XOR scheme
