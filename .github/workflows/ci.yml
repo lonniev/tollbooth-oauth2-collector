@@ -1,0 +1,65 @@
+# CI for the OAuth2 collector.
+#
+# Load-bearing choice: install runtime deps from **requirements.txt**, because that is the
+# file the deploy platform (Horizon) builds from for this service. Installing from
+# pyproject.toml instead would have let v0.2.3 pass CI while shipping a collector with no
+# `tollbooth` module — the missing dep that crashed store_code and stranded every consumer's
+# OAuth on `pending`. Test the same dependency set you deploy, and the tests (which import
+# `server` and exercise store_code → _encrypt_code → the tollbooth import) catch it.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # requirements.txt pins tollbooth-dpyc==X; wait for it to land on PyPI after an SDK cut.
+      - name: Wait for tollbooth-dpyc on PyPI
+        run: |
+          REQUIRED=$(grep -oE 'tollbooth-dpyc==[0-9.]+' requirements.txt | grep -oE '[0-9.]+' || true)
+          if [ -n "$REQUIRED" ]; then
+            for i in $(seq 1 30); do
+              pip index versions tollbooth-dpyc 2>/dev/null | grep -q "$REQUIRED" && { echo "found $REQUIRED"; break; }
+              echo "attempt $i/30 — tollbooth-dpyc==$REQUIRED not on PyPI yet, waiting 10s"; sleep 10
+            done
+          fi
+
+      # Pin parity: the deploy installs from requirements.txt, so any dep pinned in
+      # pyproject.toml MUST match requirements.txt or the deployed env differs from what
+      # was tested. Guards the exact drift that caused the outage.
+      - name: requirements.txt / pyproject.toml pin parity
+        run: |
+          fail=0
+          for pkg in tollbooth-dpyc fastmcp; do
+            r=$(grep -oE "${pkg}==[0-9.]+" requirements.txt || true)
+            p=$(grep -oE "${pkg}==[0-9.]+" pyproject.toml || true)
+            if [ "$r" != "$p" ]; then
+              echo "::error::pin drift for ${pkg}: requirements.txt='${r:-none}' vs pyproject.toml='${p:-none}'. The deploy installs from requirements.txt — keep them in lockstep."
+              fail=1
+            fi
+          done
+          [ "$fail" = 0 ] && echo "pins in lockstep."
+          exit $fail
+
+      # Install EXACTLY what the platform deploys, then add test-only tools (which must not
+      # drag in the package's runtime deps — that would mask a missing runtime dependency).
+      - name: Install (from the deploy's requirements.txt)
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio ruff
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Test
+        run: pytest tests/ -v
