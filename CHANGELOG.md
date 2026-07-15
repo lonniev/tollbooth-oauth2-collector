@@ -3,6 +3,21 @@
 All notable changes to this project will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.5] — 2026-07-15
+
+### Fixed — deploy did not land (stale-wheel / failed rebuild)
+
+- The merged commit `28555b1` (MCP Registry publishing) touched no runtime source and
+  did not advance the package version, so Horizon re-served a cached wheel and the live
+  service stopped reflecting `main` (observed unreachable). Bumping the version to `0.2.5`
+  is the canonical touch-commit: Horizon keys its wheel cache on the package version, so a
+  fresh version forces a clean rebuild and clears the stale wheel.
+- Realigned `server.json` (MCP registry) from the stale `0.2.2` to `0.2.5`. It had drifted
+  two releases behind `pyproject.toml`, so the registry advertised a version that no longer
+  matched the deployed code.
+- Added `tests/test_release_metadata.py` asserting `server.json` and `pyproject.toml`
+  declare the same version, so this drift cannot silently recur and mask a stale deploy.
+
 ## [0.2.4] — 2026-07-15
 
 ### Fixed — collector deployed without `tollbooth-dpyc`, so `store_code` crashed on every call
