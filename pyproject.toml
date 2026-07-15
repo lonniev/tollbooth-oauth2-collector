@@ -1,6 +1,6 @@
 [project]
 name = "tollbooth-oauth2-collector"
-version = "0.2.3"
+version = "0.2.4"
 description = "Unauthenticated OAuth2 callback collector for Tollbooth MCP services"
 authors = [{name = "Tollbooth OAuth2 Collector Contributors"}]
 readme = "README.md"
@@ -9,12 +9,15 @@ license = {text = "Apache-2.0"}
 keywords = ["mcp", "oauth2", "callback", "tollbooth", "fastmcp"]
 
 dependencies = [
-    "fastmcp>=2.0.0",
+    # PINNED — the deploy resolves fresh on every redeploy; unpinned floors let the
+    # transport framing (fastmcp) and the auth-code crypto (tollbooth-dpyc) drift.
+    "fastmcp==3.1.0",
     "httpx>=0.27.0",
     "cryptography>=46.0.5",
     # Single source of the collector auth-code crypto contract
-    # (encrypt_collector_code / decrypt_collector_code — encrypt added in 0.62.1).
-    "tollbooth-dpyc>=0.62.1",
+    # (encrypt_collector_code / decrypt_collector_code). MUST be installed — the
+    # platform builds from requirements.txt, so it is pinned there too.
+    "tollbooth-dpyc==0.63.2",
 ]
 
 [project.optional-dependencies]
