@@ -236,6 +236,43 @@ class TestCollectorStatus:
 
 
 # ---------------------------------------------------------------------------
+# service_status tests
+# ---------------------------------------------------------------------------
+
+
+class TestServiceStatus:
+    """Tests for the `service_status` tool.
+
+    The post-merge deploy-verify probe reads the running commit sha from this
+    tool's `build_info` to confirm a redeploy actually landed. Its absence is
+    why an otherwise-healthy deploy was reported as serving `<none>`.
+    """
+
+    @pytest.mark.asyncio
+    async def test_reports_deployed_git_sha_for_deploy_verify(self):
+        """`build_info` surfaces FASTMCP_CLOUD_GIT_COMMIT_SHA so deploy-verify
+        can compare the live sha against the merged sha."""
+        import server
+
+        sha = "8c2302cde532cc32d786366ca299f358f2dac28d"
+        with patch.dict(os.environ, {"FASTMCP_CLOUD_GIT_COMMIT_SHA": sha}):
+            result = await server.service_status()
+
+        assert result["success"] is True
+        assert result["service"] == "tollbooth-oauth2-collector"
+        assert result["build_info"]["fastmcp_cloud_git_commit_sha"] == sha
+
+    @pytest.mark.asyncio
+    async def test_reports_tollbooth_dpyc_wheel_version(self):
+        """The status echoes the installed tollbooth-dpyc wheel version — the
+        dep whose silent absence stranded every consumer's OAuth on `pending`."""
+        import server
+
+        result = await server.service_status()
+        assert result["tollbooth_dpyc_version"] != "unknown"
+
+
+# ---------------------------------------------------------------------------
 # Encryption tests
 # ---------------------------------------------------------------------------
 
