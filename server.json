@@ -1,0 +1,16 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.lonniev/tollbooth-oauth2-collector",
+  "description": "Unauthenticated OAuth2 callback collector for Tollbooth MCP services",
+  "version": "0.2.2",
+  "repository": {
+    "url": "https://github.com/lonniev/tollbooth-oauth2-collector",
+    "source": "github"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://tollbooth-oauth2-collector.fastmcp.app/mcp"
+    }
+  ]
+}
