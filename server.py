@@ -58,9 +58,13 @@ mcp = FastMCP(
         "serverless callback).\n"
         "- `retrieve_code` — Retrieve and delete a stored code (called by the "
         "originating MCP server).\n"
-        "- `collector_status` — Health check showing pending code count and TTL."
+        "- `collector_status` — Health check showing pending code count and TTL.\n"
+        "- `service_status` — Report the running build (incl. the deployed git "
+        "sha) so a redeploy can be verified."
     ),
 )
+
+_SERVICE_NAME = "tollbooth-oauth2-collector"
 
 # ---------------------------------------------------------------------------
 # Neon SQL-over-HTTP helpers
@@ -222,3 +226,43 @@ async def collector_status() -> dict[str, Any]:
         return {"status": "healthy", "pending_codes": count, "ttl_seconds": _TTL_SECONDS}
     except Exception as e:
         return {"status": "unhealthy", "error": str(e)}
+
+
+def _wheel_version(package: str) -> str:
+    """Resolve an installed wheel's version, or ``"unknown"`` if unavailable."""
+    try:
+        import importlib.metadata
+        return importlib.metadata.version(package)
+    except Exception:
+        return "unknown"
+
+
+@mcp.tool()
+async def service_status() -> dict[str, Any]:
+    """Report the running build so a redeploy can be verified. Free.
+
+    Delegates to the SDK's canonical ``build_service_status`` — the single
+    source of the service_status payload shape — so this collector reports the
+    same envelope as every other DPYC service. The load-bearing field is
+    ``build_info.fastmcp_cloud_git_commit_sha``: the commit Horizon actually
+    deployed. The post-merge deploy-verify probe reads it to confirm the live
+    service redeployed the merged sha; with no ``service_status`` tool to probe,
+    that sha reads as ``<none>`` and an otherwise-healthy deploy is flagged as
+    "did not land".
+
+    The vault/courier/operator fields are ``False``/empty by construction —
+    this is an unauthenticated community utility with no operator runtime.
+    """
+    from tollbooth.tools.status import build_service_status
+
+    return build_service_status(
+        service=_SERVICE_NAME,
+        slug=_SERVICE_NAME,
+        version=_wheel_version(_SERVICE_NAME),
+        tollbooth_version=_wheel_version("tollbooth-dpyc"),
+        vault_ok=False,
+        courier_ok=False,
+        operator_npub=None,
+        process_id=os.getpid(),
+        env=os.environ,
+    )
