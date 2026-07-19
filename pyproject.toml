@@ -17,7 +17,7 @@ dependencies = [
     # Single source of the collector auth-code crypto contract
     # (encrypt_collector_code / decrypt_collector_code). MUST be installed — the
     # platform builds from requirements.txt, so it is pinned there too.
-    "tollbooth-dpyc==0.63.2",
+    "tollbooth-dpyc==0.65.0",
 ]
 
 [project.optional-dependencies]
