@@ -13,7 +13,7 @@
  * it in Neon Postgres. The originating MCP server later retrieves it via
  * the collector's `retrieve_code` tool.
  *
- * Why this exists: Horizon (FastMCP Cloud) only proxies POST traffic on
+ * Why this exists: Horizon only proxies POST traffic on
  * the /mcp/ path. Browser GET redirects from OAuth providers cannot reach
  * custom_route endpoints. This serverless function bridges the gap.
  */

@@ -20,7 +20,7 @@ Uses Neon's SQL-over-HTTP API via httpx — no asyncpg or C extensions.
 
 DPYC Identity
 ~~~~~~~~~~~~~
-This service is registered as an **Advocate** in the DPYC Honor Chain.
+This service is registered as an **Advocate** in the DPYC Social Contract.
 Peer MCP servers discover its URL via registry lookup
 (``resolve_service_by_name("tollbooth-oauth2-collector")``).
 The browser callback URL is registered separately as
