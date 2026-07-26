@@ -3,35 +3,46 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.10+-green.svg)](https://python.org)
 
-An unauthenticated "dumb mailbox" FastMCP server that captures OAuth2 authorization codes from browser redirects and holds them for retrieval by the originating MCP server. Solves the problem of Horizon's auth-proxy rejecting unauthenticated browser redirects to `@mcp.custom_route` endpoints.
+An unauthenticated "dumb mailbox" FastMCP server that holds OAuth2 authorization codes for retrieval by the originating MCP server. A companion serverless function (Val Town) receives the browser redirect from the OAuth provider and hands the code to this collector's `store_code` MCP tool. This two-part design works around Horizon proxying only POST traffic on the `/mcp/` path — browser GET redirects from OAuth providers cannot reach `@mcp.custom_route` endpoints, so a serverless callback bridges the gap.
 
 ## How It Works
 
 ```
-┌──────────────┐    1. redirect_uri → collector    ┌─────────────────────┐
-│ OAuth Provider│ ─────────────────────────────────→│ OAuth2 Collector    │
-│ (e.g. Schwab) │   ?code=AUTH_CODE&state=TOKEN     │ GET /oauth/callback │
-└──────────────┘                                    │ → stores in Postgres│
-                                                    └─────────────────────┘
-                                                              │
-                                                              │ 2. code stored
-                                                              ▼
-┌──────────────┐    3. poll for code                ┌─────────────────────┐
-│ MCP Server   │ ─────────────────────────────────→ │ OAuth2 Collector    │
-│ (e.g.        │   GET /oauth/retrieve?state=TOKEN  │ → returns code once │
-│  schwab-mcp) │ ←───────────────────────────────── │ → deletes from DB   │
-└──────────────┘   {"code": "AUTH_CODE"}            └─────────────────────┘
+┌───────────────┐   1. redirect_uri → serverless    ┌──────────────────────┐
+│ OAuth Provider│ ─────────────────────────────────→│ Serverless callback  │
+│ (e.g. Schwab) │   GET ?code=AUTH_CODE&state=TOKEN  │ (Val Town)           │
+└───────────────┘                                    └──────────────────────┘
+                                                               │
+                                        2. POST store_code     │
+                                           (JSON-RPC /mcp/)     ▼
+                                                     ┌──────────────────────┐
+                                                     │ OAuth2 Collector     │
+                                                     │ store_code tool      │
+                                                     │ → encrypts + Postgres│
+                                                     └──────────────────────┘
+                                                               │
+                                                               │ 3. code stored
+                                                               ▼
+┌──────────────┐   4. retrieve_code(state=TOKEN)     ┌──────────────────────┐
+│ MCP Server   │ ─────────────────────────────────→  │ OAuth2 Collector     │
+│ (e.g.        │        (JSON-RPC /mcp/)             │ retrieve_code tool   │
+│  schwab-mcp) │ ←───────────────────────────────── │ → returns code once  │
+└──────────────┘   {"found": true, "code": ...}      │ → deletes from DB    │
+                                                     └──────────────────────┘
 ```
 
-1. **MCP server** starts an OAuth flow, setting `redirect_uri` to `https://<collector>/oauth/callback`
-2. **User** authorizes in the browser; the OAuth provider redirects to the collector with `?code=...&state=...`
-3. **Collector** stores the code in Postgres (600s TTL)
-4. **MCP server** calls `GET /oauth/retrieve?state=...` to pick up the code (one-time read, auto-deleted)
-5. **MCP server** exchanges the code for a token using its own credentials
+1. **MCP server** starts an OAuth flow, setting `redirect_uri` to the serverless callback function's URL
+2. **User** authorizes in the browser; the OAuth provider redirects to the serverless callback with `?code=...&state=...`
+3. **Serverless callback** (Val Town) POSTs the code to the collector's `store_code` MCP tool over `/mcp/`
+4. **Collector** encrypts the code (AES-256-GCM keyed on SHA-256 of the state) and stores it in Postgres (600s TTL)
+5. **MCP server** calls the `retrieve_code(state=...)` MCP tool to pick up the code (one-time read, auto-deleted)
+6. **MCP server** decrypts and exchanges the code for a token using its own credentials
+
+The collector also exposes `collector_status` (pending-code count and TTL) and `service_status` (deployed build, incl. git sha) as free MCP tools. The serverless callback source lives in [`val/oauth_callback.js`](val/oauth_callback.js).
 
 ## Deployment
 
-Deploy to FastMCP Cloud (Horizon):
+Deploy to Horizon:
 
 ```bash
 fastmcp deploy server.py
@@ -52,14 +63,16 @@ collector_url = svc["url"]  # e.g., "https://tollbooth-oauth2-collector.fastmcp.
 
 No `OAUTH_COLLECTOR_URL` env var needed — peer discovery is handled by the registry.
 
-Register the collector's callback URL in your OAuth provider's developer portal:
-```
-https://tollbooth-oauth2-collector.fastmcp.app/oauth/callback
+Register the **serverless callback function's** URL (not the collector's) in your OAuth provider's developer portal. It is registered separately in the DPYC registry under the name `tollbooth-oauth2-callback`:
+```python
+callback = await resolve_service_by_name("tollbooth-oauth2-callback")
+redirect_uri = callback["url"]  # e.g., "https://tollbooth-dpyc-oauth.val.run"
 ```
 
 ## Security Model
 
 - **Auth codes are useless alone** — exchanging a code requires `client_id` + `client_secret`, held only by the consuming MCP server
+- **Encrypted at rest** — codes are stored AES-256-GCM-encrypted (keyed on SHA-256 of the state) via the SDK's `encrypt_collector_code`; the consuming MCP server decrypts with the same state
 - **HMAC-signed state tokens** — the originating MCP server generates tamper-proof state tokens
 - **One-time read** — codes are deleted immediately after retrieval (prevents replay)
 - **Short TTL** — expired codes are automatically cleaned up (600s)
