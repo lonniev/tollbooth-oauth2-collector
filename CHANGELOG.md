@@ -18,6 +18,33 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   vault/courier/operator fields are reported empty by construction: this is an
   unauthenticated community utility with no operator runtime.
 
+## 0.2.5 — 2026-08-10
+
+### Added — a canonical `service_status`, so a deploy can be confirmed
+
+The collector could not be asked what it was running, which is why deploy-verify was removed
+from it rather than fixed: the probe had nothing to read. `service_status` now reports the
+landed sha like every other service.
+
+### Changed — track tollbooth-dpyc 0.85.0, in both files
+
+This repo pins in `pyproject.toml` **and** `requirements.txt`, because Horizon builds from
+the latter while local tooling reads the former. They must not drift: when they did, the
+deployed collector had no `tollbooth` module at all and `store_code` failed on every call,
+stranding OAuth for the whole fleet. Both now read 0.85.0.
+
+Picks up `check_authority_balance`, dead for every operator, and the shared param-default
+binding.
+
+### Changed — CI runs the check the deploy runs
+
+`ci.yml` inspects the deploy entrypoint, the check Horizon performs at build time — the gap
+that let optionality-mcp sit four days stale behind a green suite. `release.yml` notes
+extraction accepts this CHANGELOG's heading style instead of publishing a 16-byte body.
+
+Note: 0.2.4 was written here but never tagged, so it never shipped a release. This entry
+covers that work too.
+
 ## [0.2.4] — 2026-07-15
 
 ### Fixed — collector deployed without `tollbooth-dpyc`, so `store_code` crashed on every call
