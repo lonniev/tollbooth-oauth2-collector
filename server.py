@@ -135,20 +135,20 @@ async def _cleanup_expired():
 
 
 # ---------------------------------------------------------------------------
-# Code encryption — AES-256-GCM with random IV, keyed on SHA-256(state)
+# Code sealing — NIP-44 to the operator's public key (SDK-canonical)
 # ---------------------------------------------------------------------------
 
 
-def _encrypt_code(code: str, state: str) -> str:
-    """Encrypt an authorization code using AES-256-GCM.
+def _seal_code(code: str, operator_npub: str) -> str:
+    """Seal an authorization code to the operator's public key.
 
     Delegates to the SDK's canonical ``encrypt_collector_code`` — the single
     source of this contract, whose peer ``decrypt_collector_code`` the
-    originating MCP server uses. Keeping both halves in tollbooth-dpyc stops the
-    collector and the servers from drifting apart on key derivation or framing.
+    originating MCP server opens with its own nsec. Keeping both halves in
+    tollbooth-dpyc stops the collector and the servers from drifting apart.
     """
     from tollbooth.oauth2_collector import encrypt_collector_code
-    return encrypt_collector_code(code, state)
+    return encrypt_collector_code(code, operator_npub)
 
 
 # ---------------------------------------------------------------------------
@@ -158,27 +158,42 @@ def _encrypt_code(code: str, state: str) -> str:
 
 @mcp.tool()
 async def store_code(code: str, state: str) -> dict[str, Any]:
-    """Store an encrypted OAuth2 authorization code.
+    """Store a sealed OAuth2 authorization code.
 
-    Called by the serverless callback function after the browser redirect.
-    The code is encrypted with SHA-256(state) before storage.
+    Called by the serverless callback function after the browser redirect. The
+    ``state`` carries BOTH the patron npub (the lookup/retrieve key) and the
+    operator npub (the PUBLIC key the code is sealed to) — see the SDK's
+    ``pack_oauth_state``. The code is sealed with NIP-44 to the operator so only
+    that operator's nsec can open it; the Neon row is keyed by the patron npub,
+    so retrieval (``retrieve_code(state=patron_npub)``) is unchanged.
 
     Args:
         code: The authorization code from the OAuth provider.
-        state: The state token (patron npub) from the authorization request.
+        state: The packed state (``patron_npub.operator_npub``).
 
     Returns:
         Dict with ``success`` key and a message.
     """
+    from tollbooth.oauth2_collector import unpack_oauth_state
+
+    patron_npub, operator_npub = unpack_oauth_state(state)
+    if not operator_npub:
+        return {
+            "success": False,
+            "error": (
+                "state carries no operator npub — re-initiate the OAuth flow "
+                "with a current client (begin_oauth now seals to the operator)."
+            ),
+        }
     try:
-        encrypted_code = _encrypt_code(code, state)
+        encrypted_code = _seal_code(code, operator_npub)
         await _cleanup_expired()
         await _execute(
             "INSERT INTO oauth_codes (state, code) VALUES ($1, $2) "
             "ON CONFLICT (state) DO UPDATE SET code = $2, received_at = NOW()",
-            [state, encrypted_code],
+            [patron_npub, encrypted_code],
         )
-        logger.info("Stored encrypted OAuth code for state=%s", state[:16])
+        logger.info("Stored sealed OAuth code for patron=%s", patron_npub[:16])
         return {"success": True, "message": "Code stored successfully."}
     except Exception as e:
         logger.exception("Failed to store OAuth code")

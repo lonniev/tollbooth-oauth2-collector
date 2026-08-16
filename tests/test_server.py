@@ -2,7 +2,7 @@
 
 Mocks Neon's SQL-over-HTTP API so no real Postgres is required. Targets the
 current MCP-tool surface (`store_code`, `retrieve_code`, `collector_status`)
-and the AES-256-GCM `_encrypt_code` primitive.
+and the NIP-44 `_seal_code` primitive.
 """
 
 import os
@@ -53,13 +53,20 @@ def _reset_server_state(server_module):
 # ---------------------------------------------------------------------------
 
 
+# A packed OAuth state: "<patron_npub>.<operator_npub>". store_code seals the code
+# to the operator npub (NIP-44) and keys the Neon row by the patron npub.
+_PATRON = "npub1y20qa7d3ddmh6730hdr0u0r08zys4p7pyk30uhur9edx4d88q4zqnr3q2h"
+_OPERATOR = "npub1ymgfh46ace33zgld5zdc7gyhc5keyu42v36td0q7c44ks45d79eslwe2q2"
+_PACKED_STATE = f"{_PATRON}.{_OPERATOR}"
+
+
 class TestStoreCode:
     """Tests for the `store_code` MCP tool."""
 
     @pytest.mark.asyncio
-    async def test_store_code_encrypts_before_persisting(self):
-        """The plaintext code never reaches Neon — the INSERT params must
-        contain ciphertext, not the raw authorization code."""
+    async def test_store_code_seals_before_persisting(self):
+        """The plaintext code never reaches Neon — the INSERT params must carry
+        the NIP-44 sealed envelope, and the row is keyed by the patron npub."""
         import server
 
         mock_client = _install_mock_client(
@@ -67,7 +74,7 @@ class TestStoreCode:
         )
 
         try:
-            result = await server.store_code(code="auth-code-xyz", state="state-token-123")
+            result = await server.store_code(code="auth-code-xyz", state=_PACKED_STATE)
             assert result["success"] is True
 
             insert_calls = [
@@ -77,9 +84,25 @@ class TestStoreCode:
             assert len(insert_calls) >= 1
 
             body = insert_calls[0].kwargs.get("json")
-            stored_code = body["params"][1]
-            assert stored_code != "auth-code-xyz", \
-                "Code must be encrypted, not stored as plaintext"
+            keyed_by, stored_code = body["params"][0], body["params"][1]
+            assert keyed_by == _PATRON, "Row must be keyed by the patron npub, not the packed state"
+            assert stored_code != "auth-code-xyz", "Code must be sealed, not stored as plaintext"
+        finally:
+            _reset_server_state(server)
+
+    @pytest.mark.asyncio
+    async def test_store_code_refuses_state_without_operator(self):
+        """A legacy patron-only state has no operator to seal to — refuse it
+        rather than seal to the wrong (public) key."""
+        import server
+
+        _install_mock_client(
+            server, return_value=_mock_neon_response({"rows": [], "command": "INSERT"})
+        )
+        try:
+            result = await server.store_code(code="c", state="npub1patrononly")
+            assert result["success"] is False
+            assert "operator" in result["error"].lower()
         finally:
             _reset_server_state(server)
 
@@ -94,7 +117,7 @@ class TestStoreCode:
         )
 
         try:
-            await server.store_code(code="c", state="s")
+            await server.store_code(code="c", state=_PACKED_STATE)
             cleanup_calls = [
                 call for call in mock_client.post.call_args_list
                 if "DELETE FROM oauth_codes WHERE received_at" in str(call)
@@ -116,7 +139,7 @@ class TestStoreCode:
         server._schema_ensured = True
 
         try:
-            result = await server.store_code(code="c", state="s")
+            result = await server.store_code(code="c", state=_PACKED_STATE)
             assert result["success"] is False
             assert "Neon unreachable" in result["error"]
         finally:
@@ -270,64 +293,3 @@ class TestServiceStatus:
 
         result = await server.service_status()
         assert result["tollbooth_dpyc_version"] != "unknown"
-
-
-# ---------------------------------------------------------------------------
-# Encryption tests
-# ---------------------------------------------------------------------------
-
-
-class TestEncryption:
-    """Tests for `_encrypt_code` — AES-256-GCM with SHA-256(state) as the key
-    and a 12-byte random IV prepended to the ciphertext."""
-
-    def test_encrypt_produces_non_plaintext(self):
-        """Encrypted output differs from plaintext."""
-        from server import _encrypt_code
-
-        encrypted = _encrypt_code("auth-code-xyz", "state-token-123")
-        assert encrypted != "auth-code-xyz"
-
-    def test_encrypt_decrypt_roundtrip(self):
-        """AES-256-GCM with SHA-256(state) decrypts the ciphertext that
-        _encrypt_code produced. Mirrors what the originating MCP server
-        does when it retrieves the code."""
-        import base64
-        import hashlib
-
-        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-
-        from server import _encrypt_code
-
-        code = "my-secret-auth-code-1234"
-        state = "nonce.hmac-signature"
-
-        encrypted_b64 = _encrypt_code(code, state)
-
-        raw = base64.urlsafe_b64decode(encrypted_b64)
-        iv, ct = raw[:12], raw[12:]
-        key = hashlib.sha256(state.encode()).digest()
-        decrypted = AESGCM(key).decrypt(iv, ct, None)
-
-        assert decrypted.decode() == code
-
-    def test_different_states_produce_different_ciphertext(self):
-        """Same code under two different state tokens yields distinct
-        ciphertexts (different keys + random IVs make repetition statistically
-        impossible)."""
-        from server import _encrypt_code
-
-        enc1 = _encrypt_code("auth-code-xyz", "state-a")
-        enc2 = _encrypt_code("auth-code-xyz", "state-b")
-        assert enc1 != enc2
-
-    def test_same_state_same_code_produces_different_ciphertext(self):
-        """Even with identical inputs, a fresh random IV makes each call
-        produce different ciphertext — defends against IV-reuse attacks
-        on AES-GCM."""
-        from server import _encrypt_code
-
-        enc1 = _encrypt_code("auth-code-xyz", "state-a")
-        enc2 = _encrypt_code("auth-code-xyz", "state-a")
-        assert enc1 != enc2, \
-            "IV must be random per call; identical ciphertext indicates IV reuse"
