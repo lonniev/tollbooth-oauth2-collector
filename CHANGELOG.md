@@ -18,6 +18,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   vault/courier/operator fields are reported empty by construction: this is an
   unauthenticated community utility with no operator runtime.
 
+## 0.2.6 — 2026-08-17
+
+### Changed — track tollbooth-dpyc 0.86.0 (GitHub-free bootstrap)
+
+Picks up the GitHub-free operator bootstrap: relays and Authority resolution now come from the Oracle via MCP, so this operator no longer reads the dpyc-community registry on GitHub — closing the fleet-wide bootstrap SPOF.
+
 ## 0.2.5 — 2026-08-10
 
 ### Added — a canonical `service_status`, so a deploy can be confirmed
