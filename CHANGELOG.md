@@ -18,6 +18,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   vault/courier/operator fields are reported empty by construction: this is an
   unauthenticated community utility with no operator runtime.
 
+## [0.2.8] — 2026-08-22
+
+### Changed — track tollbooth-dpyc 0.87.2
+
+An object argument a client serialised as a JSON string is now parsed
+rather than refused as `dict_type`. Fixes `update_post` rejecting a
+large patch and `update_design_text` rejecting a multi-key edits
+object.
+
 ## [0.2.7] — 2026-08-22
 
 ### Changed — track tollbooth-dpyc 0.87.1
