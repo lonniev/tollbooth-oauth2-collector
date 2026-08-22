@@ -1,6 +1,6 @@
 [project]
 name = "tollbooth-oauth2-collector"
-version = "0.2.7"
+version = "0.2.8"
 description = "Unauthenticated OAuth2 callback collector for Tollbooth MCP services"
 authors = [{name = "Tollbooth OAuth2 Collector Contributors"}]
 readme = "README.md"
@@ -17,7 +17,7 @@ dependencies = [
     # Single source of the collector auth-code crypto contract
     # (encrypt_collector_code / decrypt_collector_code). MUST be installed — the
     # platform builds from requirements.txt, so it is pinned there too.
-    "tollbooth-dpyc==0.87.1",
+    "tollbooth-dpyc==0.87.2",
 ]
 
 [project.optional-dependencies]
