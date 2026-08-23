@@ -18,6 +18,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   vault/courier/operator fields are reported empty by construction: this is an
   unauthenticated community utility with no operator runtime.
 
+## [0.2.9] — 2026-08-22
+
+### Changed — track tollbooth-dpyc 0.87.3
+
+Recovering an orphaned job now uses the detached executor it was
+dispatched to. The recovery path never resolved the executor, so a
+job orphaned by a container recycle was retried in-process on the
+new front — bypassing the detached runner precisely when it was
+the point.
+
 ## [0.2.8] — 2026-08-22
 
 ### Changed — track tollbooth-dpyc 0.87.2
