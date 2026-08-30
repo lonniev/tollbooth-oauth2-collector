@@ -11,7 +11,7 @@ keywords = ["mcp", "oauth2", "callback", "tollbooth", "fastmcp"]
 dependencies = [
     # PINNED — the deploy resolves fresh on every redeploy; unpinned floors let the
     # transport framing (fastmcp) and the auth-code crypto (tollbooth-dpyc) drift.
-    "fastmcp==3.4.7",
+    "fastmcp>=3.4.7",
     "httpx>=0.27.0",
     "cryptography>=46.0.5",
     # Single source of the collector auth-code crypto contract
@@ -24,7 +24,7 @@ dependencies = [
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
-    "ruff>=0.3.0",
+    "ruff>=0.16.0",
 ]
 
 [build-system]

@@ -1,0 +1,11 @@
+{
+  "name": "Tollbooth OAuth2 Collector",
+  "source": {
+    "path": "server.py",
+    "entrypoint": "mcp"
+  },
+  "environment": {
+    "type": "uv",
+    "project": "."
+  }
+}
