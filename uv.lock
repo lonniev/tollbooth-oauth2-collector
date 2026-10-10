@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 
 [[package]]
@@ -1308,16 +1308,16 @@ sdist = { url = "https://files.pythonhosted.org/packages/bb/89/6df40b0c5fd9a1c30
 
 [[package]]
 name = "tollbooth-dpyc"
-version = "0.96.0"
+version = "0.98.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cryptography" },
     { name = "httpx" },
     { name = "pynostr" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ef/12/b0d4d4b8626633e9b087d5e41ca96f4109a8b55ab744ea0b65134dc09c00/tollbooth_dpyc-0.96.0.tar.gz", hash = "sha256:d46c2a2ca1a679cf2bd1dec0eb435a0c5fb0c408402236d6d0a3b0c87eaaf869", size = 2797948, upload-time = "2026-09-29T02:22:41.724Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/74/42/7d10b076e0d6afde27c0233c5bfc61dca3ae1459d98c7b6d63a4e75eca00/tollbooth_dpyc-0.98.0.tar.gz", hash = "sha256:3627a30c16f304e3e86d854081cce79b42c5732051e1cf1043d2f4715b7b01d2", size = 2813874, upload-time = "2026-10-07T23:11:40.427Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9c/8c/4c160fcb2ba41c30b089996d2f7d6c20ddf3006b6982dc8039c4c2e99718/tollbooth_dpyc-0.96.0-py3-none-any.whl", hash = "sha256:223ead9cc283f65708924c44dec6ccc41429d824c2e0897fde4fe2f9490389a3", size = 457191, upload-time = "2026-09-29T02:22:39.557Z" },
+    { url = "https://files.pythonhosted.org/packages/54/30/b19a050a96dfda80819389da878ed5cd5510da89d3ad7a7f7cca2f451927/tollbooth_dpyc-0.98.0-py3-none-any.whl", hash = "sha256:33cd7f2f297f8526877c47fdb45db0ce9240121d2d02cb2a855e6dd7dbf4c954", size = 464754, upload-time = "2026-10-07T23:11:38.299Z" },
 ]
 
 [[package]]
@@ -1346,7 +1346,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.16.0" },
-    { name = "tollbooth-dpyc", specifier = "==0.96.0" },
+    { name = "tollbooth-dpyc", specifier = "==0.98.0" },
 ]
 provides-extras = ["dev"]
 
