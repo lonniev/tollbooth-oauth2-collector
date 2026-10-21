@@ -5,6 +5,27 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Changes not yet released live in `changelog.d/`, one file per change — see the README there for why, and `scripts/changelog.py` for what folds them in at release time.
 
+## [0.2.12] — 2026-10-21
+
+### Changed
+
+- The README now matches the code: codes are sealed with NIP-44 to the operator npub carried in the `patron.operator` state (no AES-keyed-on-state, no HMAC state), peers find the collector and callback through the Oracle (`default_oracle_client().resolve_service`) since `resolve_service_by_name` is gone, the Python badge reads 3.12+, and the related-repo table lists goodearth, beesknees, roastify, ChartRemotely and tollbooth-web.
+
+- Dependencies refreshed to current releases (mcp/fastmcp 1.26.0/3.4.7 → 2.3.0/4.1.0; frontend minor/patch). No service stays on old transitive versions.
+
+### Fixed
+
+- The post-merge deploy-verify probe reads the live commit sha from the canonical
+  `service_status` tool's `build_info.fastmcp_cloud_git_commit_sha`. This collector
+  exposed only `collector_status`, never `service_status`, so the probe found no sha
+  to read and reported the deploy as serving `<none>` — flagging an otherwise-healthy
+  service as "did not land" (issue #9).
+- Added a `service_status` MCP tool that delegates to the SDK's canonical
+  `build_service_status` (tollbooth-dpyc) — the single source of the status payload
+  shape — surfacing the deployed git sha, wheel versions, and build info. The
+  vault/courier/operator fields are reported empty by construction: this is an
+  unauthenticated community utility with no operator runtime.
+
 ## [0.2.11] — 2026-08-24
 
 ### Security — track tollbooth-dpyc 0.88.1 (cryptography floor raised to >=49.0.0)
