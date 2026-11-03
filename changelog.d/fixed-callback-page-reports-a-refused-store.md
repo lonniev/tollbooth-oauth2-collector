@@ -1,0 +1,1 @@
+- The callback page says "Not Saved" when the collector refuses or fails to store a code. It used to say "Received & Saved" whenever the collector answered at all.
