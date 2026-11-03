@@ -92,9 +92,24 @@ const FAIL_HTML = `<!DOCTYPE html>
 <html><head><title>Error</title></head>
 <body style="font-family:system-ui,sans-serif;max-width:480px;margin:80px auto;
 text-align:center">
-<h1>Storage Error</h1>
-<p>Failed to store the authorization code. Please try again.</p>
+<h1>Not Saved</h1>
+<p>The authorization code was not saved. Start again from your agentic app.</p>
 </body></html>`;
+
+// The collector answers 200 even when it refuses a code; what it said is in the
+// tool result, as JSON or as the last `data:` line of an event stream.
+function storedOk(body) {
+  const lines = body.split("\n").filter((l) => l.startsWith("data:"));
+  const json = lines.length ? lines[lines.length - 1].slice(5) : body;
+  try {
+    const result = JSON.parse(json).result || {};
+    const answer = result.structuredContent ||
+      JSON.parse(((result.content || [])[0] || {}).text || "{}");
+    return answer.success === true;
+  } catch {
+    return false;
+  }
+}
 
 export default async function handler(req) {
   const url = new URL(req.url);
@@ -123,8 +138,9 @@ export default async function handler(req) {
       }),
     });
 
-    if (!resp.ok) {
-      console.error(`Collector returned ${resp.status}: ${await resp.text()}`);
+    const body = await resp.text();
+    if (!resp.ok || !storedOk(body)) {
+      console.error(`Collector did not store the code (${resp.status}): ${body.slice(0, 300)}`);
       return new Response(FAIL_HTML, {
         status: 502,
         headers: { "Content-Type": "text/html" },
