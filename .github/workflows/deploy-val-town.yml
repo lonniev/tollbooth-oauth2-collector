@@ -1,0 +1,107 @@
+# Deploys the browser callback (val/oauth_callback.js) to Val Town.
+#
+# The callback is the page OAuth providers redirect to. It used to be pasted into
+# Val Town by hand, so the repo copy and the live page could drift. This job
+# makes the repo the source: a change to the file on main replaces the code of
+# the HTTP file that serves CALLBACK_HOST.
+#
+# It finds that file itself, among the token owner's vals, by the endpoint it
+# serves, so no val id is kept here. It then reads the code back and compares it.
+#
+# Needs VALTOWN_TOKEN: a Val Town API token with val:write
+# (val.town → Settings → API Tokens), stored as a repo secret.
+name: Deploy callback to Val Town
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - val/oauth_callback.js
+      - .github/workflows/deploy-val-town.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-val-town
+  cancel-in-progress: false
+
+env:
+  API: https://api.val.town
+  CALLBACK_HOST: tollbooth-dpyc-oauth.val.run
+  SOURCE: val/oauth_callback.js
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Find the HTTP file that serves the callback
+        id: find
+        env:
+          VALTOWN_TOKEN: ${{ secrets.VALTOWN_TOKEN }}
+        run: |
+          set -euo pipefail
+          [ -n "$VALTOWN_TOKEN" ] || { echo "::error::VALTOWN_TOKEN is not set on this repo."; exit 1; }
+          auth=(-H "Authorization: Bearer $VALTOWN_TOKEN")
+          vals=$(curl -fsS "${auth[@]}" "$API/v2/me/vals?offset=0&limit=100" | jq -r '.data[].id')
+          for val in $vals; do
+            match=$(curl -fsS "${auth[@]}" \
+              "$API/v2/vals/$val/files?path=&recursive=true&offset=0&limit=100" \
+              | jq -r --arg host "$CALLBACK_HOST" \
+                '.data[] | select(.type == "http") | select((.links.endpoint // "") | contains($host)) | .path' \
+              | head -n1)
+            if [ -n "$match" ]; then
+              echo "val_id=$val" >> "$GITHUB_OUTPUT"
+              echo "path=$match" >> "$GITHUB_OUTPUT"
+              echo "Callback is $match in val $val."
+              exit 0
+            fi
+          done
+          echo "::error::No HTTP file among this token's vals serves $CALLBACK_HOST."
+          exit 1
+
+      - name: Replace its code
+        env:
+          VALTOWN_TOKEN: ${{ secrets.VALTOWN_TOKEN }}
+          VAL_ID: ${{ steps.find.outputs.val_id }}
+          FILE_PATH: ${{ steps.find.outputs.path }}
+        run: |
+          set -euo pipefail
+          jq -n --rawfile content "$SOURCE" '{content: $content, type: "http"}' > body.json
+          path=$(jq -rn --arg p "$FILE_PATH" '$p | @uri')
+          curl -fsS -X PUT \
+            -H "Authorization: Bearer $VALTOWN_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data-binary @body.json -o put.json \
+            "$API/v2/vals/$VAL_ID/files?path=$path"
+          jq '{path, version, updatedAt}' put.json
+
+      - name: Read it back
+        env:
+          VALTOWN_TOKEN: ${{ secrets.VALTOWN_TOKEN }}
+          VAL_ID: ${{ steps.find.outputs.val_id }}
+          FILE_PATH: ${{ steps.find.outputs.path }}
+        run: |
+          set -euo pipefail
+          path=$(jq -rn --arg p "$FILE_PATH" '$p | @uri')
+          curl -fsS -H "Authorization: Bearer $VALTOWN_TOKEN" \
+            -o live.js "$API/v2/vals/$VAL_ID/files/content?path=$path"
+          if cmp -s live.js "$SOURCE"; then
+            echo "Val Town now serves the repo's $SOURCE."
+          else
+            echo "::error::The code Val Town returned differs from $SOURCE."
+            diff <(head -c 4000 "$SOURCE") <(head -c 4000 live.js) | head -40 || true
+            exit 1
+          fi
+
+      - name: The callback answers
+        run: |
+          set -euo pipefail
+          # A request with no code or state must get the "Missing Parameters" page.
+          status=$(curl -s -o page.html -w "%{http_code}" "https://$CALLBACK_HOST/")
+          grep -q "Missing Parameters" page.html && [ "$status" = 400 ] \
+            || { echo "::error::https://$CALLBACK_HOST/ answered $status without the expected page."; exit 1; }
+          echo "https://$CALLBACK_HOST/ answers."

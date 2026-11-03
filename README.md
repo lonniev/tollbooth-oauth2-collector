@@ -38,7 +38,7 @@ An unauthenticated "dumb mailbox" FastMCP server that holds OAuth2 authorization
 5. **MCP server** calls the `retrieve_code(state=<patron npub>)` MCP tool to pick up the sealed code (one-time read, auto-deleted)
 6. **MCP server** opens the seal with its own nsec (`decrypt_collector_code`) and exchanges the code for a token using its own credentials
 
-The collector also exposes `collector_status` (pending-code count and TTL) and `service_status` (deployed build, incl. git sha) as free MCP tools. The serverless callback source lives in [`val/oauth_callback.js`](val/oauth_callback.js).
+The collector also exposes `collector_status` (pending-code count and TTL) and `service_status` (deployed build, incl. git sha) as free MCP tools. The serverless callback source lives in [`val/oauth_callback.js`](val/oauth_callback.js). A change to it on main deploys it to Val Town (`.github/workflows/deploy-val-town.yml`, which needs the `VALTOWN_TOKEN` secret).
 
 ## Deployment
 
