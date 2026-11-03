@@ -9,9 +9,12 @@
  * forwards the code to the Tollbooth OAuth2 Collector's `store_code` MCP
  * tool via a single JSON-RPC POST to the collector's /mcp/ endpoint.
  *
- * The collector encrypts the code at rest using SHA-256(state) and stores
- * it in Neon Postgres. The originating MCP server later retrieves it via
- * the collector's `retrieve_code` tool.
+ * The collector seals the code to the operator's npub (NIP-44) and files it
+ * under the patron npub plus the flow's one-time secret. The originating MCP
+ * server later retrieves it via the collector's `retrieve_code` tool.
+ *
+ * The success page names the npub the account was linked to, so a person
+ * who approved someone else's link can see it went to an npub not theirs.
  *
  * Why this exists: Horizon only proxies POST traffic on
  * the /mcp/ path. Browser GET redirects from OAuth providers cannot reach
@@ -21,7 +24,19 @@
 const COLLECTOR_MCP_URL =
   "https://tollbooth-oauth2-collector.fastmcp.app/mcp/";
 
-const SUCCESS_HTML = `<!DOCTYPE html>
+const NPUB = /^npub1[02-9ac-hj-np-z]{58}$/;
+
+function linkedNpubLine(state) {
+  const npub = state.split(".")[0];
+  if (!NPUB.test(npub)) return "";
+  const short = `${npub.slice(0, 12)}\u2026${npub.slice(-6)}`;
+  return `<p style="font-size:15px;line-height:1.5;color:#374151;margin:0 0 8px">
+This account is now linked to <strong><code>${short}</code></strong>.</p>
+<p style="font-size:14px;line-height:1.5;color:#b45309;margin:0 0 20px">
+If that is not your npub, tell the operator now.</p>`;
+}
+
+const SUCCESS_HTML = (linked) => `<!DOCTYPE html>
 <html><head><title>Authorization Code Received</title></head>
 <body style="font-family:system-ui,sans-serif;max-width:520px;margin:60px auto;
 text-align:center;color:#1a1a1a;padding:0 20px">
@@ -33,6 +48,7 @@ Authorization Code Received &amp; Saved</h1>
 <p style="font-size:15px;line-height:1.5;color:#374151;margin:0 0 20px">
 Your authorization code has been securely encrypted for your identity
 and stored for retrieval.</p>
+${linked}
 <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0">
 <p style="font-size:15px;line-height:1.5;color:#374151;margin:0 0 8px">
 You can close this tab and return to your agentic app
@@ -115,7 +131,7 @@ export default async function handler(req) {
       });
     }
 
-    return new Response(SUCCESS_HTML, {
+    return new Response(SUCCESS_HTML(linkedNpubLine(state)), {
       status: 200,
       headers: { "Content-Type": "text/html" },
     });
