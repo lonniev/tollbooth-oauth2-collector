@@ -161,28 +161,31 @@ async def store_code(code: str, state: str) -> dict[str, Any]:
     """Store a sealed OAuth2 authorization code.
 
     Called by the serverless callback function after the browser redirect. The
-    ``state`` carries BOTH the patron npub (the lookup/retrieve key) and the
-    operator npub (the PUBLIC key the code is sealed to) — see the SDK's
+    ``state`` carries the patron npub, the operator npub (the PUBLIC key the
+    code is sealed to) and the flow's one-time secret — see the SDK's
     ``pack_oauth_state``. The code is sealed with NIP-44 to the operator so only
-    that operator's nsec can open it; the Neon row is keyed by the patron npub,
-    so retrieval (``retrieve_code(state=patron_npub)``) is unchanged.
+    that operator's nsec can open it. The Neon row is keyed by
+    ``oauth_code_key(state)`` (patron npub + secret), so only the flow that
+    holds the secret finds it: a link someone else built with a patron's npub
+    files its code where that patron's flow never looks.
 
     Args:
         code: The authorization code from the OAuth provider.
-        state: The packed state (``patron_npub.operator_npub``).
+        state: The packed state (``patron_npub.operator_npub.secret``).
 
     Returns:
         Dict with ``success`` key and a message.
     """
-    from tollbooth.oauth2_collector import unpack_oauth_state
+    from tollbooth.oauth2_collector import oauth_code_key, unpack_oauth_state
 
     patron_npub, operator_npub = unpack_oauth_state(state)
-    if not operator_npub:
+    code_key = oauth_code_key(state)
+    if not operator_npub or not code_key:
         return {
             "success": False,
             "error": (
-                "state carries no operator npub — re-initiate the OAuth flow "
-                "with a current client (begin_oauth now seals to the operator)."
+                "state carries no operator npub or no flow secret — start the "
+                "OAuth flow again with begin_oauth."
             ),
         }
     try:
@@ -191,7 +194,7 @@ async def store_code(code: str, state: str) -> dict[str, Any]:
         await _execute(
             "INSERT INTO oauth_codes (state, code) VALUES ($1, $2) "
             "ON CONFLICT (state) DO UPDATE SET code = $2, received_at = NOW()",
-            [patron_npub, encrypted_code],
+            [code_key, encrypted_code],
         )
         logger.info("Stored sealed OAuth code for patron=%s", patron_npub[:16])
         return {"success": True, "message": "Code stored successfully."}
@@ -209,7 +212,8 @@ async def retrieve_code(state: str) -> dict[str, Any]:
     caller decrypts using the same state token.
 
     Args:
-        state: The state token (patron npub) used during authorization.
+        state: Where the code was filed: patron npub + the flow's secret
+            (the SDK's ``oauth_code_key`` of the authorization state).
 
     Returns:
         Dict with ``code`` (encrypted) on success, or ``error`` if not found.

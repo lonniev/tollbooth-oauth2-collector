@@ -1,0 +1,1 @@
+- A code is filed under the patron npub plus the flow's one-time secret from the OAuth `state`, and a state without a secret is refused. A link someone else built with a patron's npub can no longer deliver their account into that patron's session. The callback page names the npub the account was linked to.

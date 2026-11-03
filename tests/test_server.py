@@ -53,11 +53,12 @@ def _reset_server_state(server_module):
 # ---------------------------------------------------------------------------
 
 
-# A packed OAuth state: "<patron_npub>.<operator_npub>". store_code seals the code
-# to the operator npub (NIP-44) and keys the Neon row by the patron npub.
+# A packed OAuth state: "<patron_npub>.<operator_npub>.<secret>". store_code seals
+# the code to the operator npub (NIP-44) and keys the Neon row by patron + secret.
 _PATRON = "npub1y20qa7d3ddmh6730hdr0u0r08zys4p7pyk30uhur9edx4d88q4zqnr3q2h"
 _OPERATOR = "npub1ymgfh46ace33zgld5zdc7gyhc5keyu42v36td0q7c44ks45d79eslwe2q2"
-_PACKED_STATE = f"{_PATRON}.{_OPERATOR}"
+_SECRET = "flow-secret_Abc123"
+_PACKED_STATE = f"{_PATRON}.{_OPERATOR}.{_SECRET}"
 
 
 class TestStoreCode:
@@ -85,7 +86,7 @@ class TestStoreCode:
 
             body = insert_calls[0].kwargs.get("json")
             keyed_by, stored_code = body["params"][0], body["params"][1]
-            assert keyed_by == _PATRON, "Row must be keyed by the patron npub, not the packed state"
+            assert keyed_by == f"{_PATRON}.{_SECRET}", "Row must be keyed by patron + secret (F16)"
             assert stored_code != "auth-code-xyz", "Code must be sealed, not stored as plaintext"
         finally:
             _reset_server_state(server)
@@ -103,6 +104,23 @@ class TestStoreCode:
             result = await server.store_code(code="c", state="npub1patrononly")
             assert result["success"] is False
             assert "operator" in result["error"].lower()
+        finally:
+            _reset_server_state(server)
+
+    @pytest.mark.asyncio
+    async def test_store_code_refuses_state_without_a_flow_secret(self):
+        """F16: without the flow's secret the code could be filed where the
+        patron's own flow looks; refuse it."""
+        import server
+
+        mock_client = _install_mock_client(
+            server, return_value=_mock_neon_response({"rows": [], "command": "INSERT"})
+        )
+        try:
+            result = await server.store_code(code="c", state=f"{_PATRON}.{_OPERATOR}")
+            assert result["success"] is False
+            inserts = [c for c in mock_client.post.call_args_list if "INSERT INTO oauth_codes" in str(c)]
+            assert not inserts
         finally:
             _reset_server_state(server)
 
