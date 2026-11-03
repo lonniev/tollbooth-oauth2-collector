@@ -119,7 +119,8 @@ class TestStoreCode:
         try:
             result = await server.store_code(code="c", state=f"{_PATRON}.{_OPERATOR}")
             assert result["success"] is False
-            inserts = [c for c in mock_client.post.call_args_list if "INSERT INTO oauth_codes" in str(c)]
+            calls = mock_client.post.call_args_list
+            inserts = [c for c in calls if "INSERT INTO oauth_codes" in str(c)]
             assert not inserts
         finally:
             _reset_server_state(server)
