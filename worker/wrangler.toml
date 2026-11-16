@@ -1,0 +1,10 @@
+# The browser callback OAuth providers redirect to.
+# Deployed by .github/workflows/deploy-worker.yml on a change to main.
+name = "tollbooth-oauth-callback"
+main = "oauth_callback.js"
+compatibility_date = "2026-11-01"
+workers_dev = false
+
+routes = [
+  { pattern = "oauth.tollbooth-dpyc.com", custom_domain = true },
+]

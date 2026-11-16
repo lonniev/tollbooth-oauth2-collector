@@ -1,1 +1,0 @@
-- The browser callback deploys itself: a change to `val/oauth_callback.js` on main replaces the code Val Town serves at tollbooth-dpyc-oauth.val.run, reads it back, and checks the page answers. Needs the `VALTOWN_TOKEN` repo secret (a Val Town API token with `val:write`).

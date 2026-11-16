@@ -14,3 +14,6 @@ venv/
 .mypy_cache/
 # uv.lock IS tracked: `uv sync --locked` is how Horizon installs, and it
 # cannot verify a lock that is not in the repo.
+
+# wrangler build cache
+.wrangler/

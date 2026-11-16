@@ -3,14 +3,14 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.12+-green.svg)](https://python.org)
 
-An unauthenticated "dumb mailbox" FastMCP server that holds OAuth2 authorization codes for retrieval by the originating MCP server. A companion serverless function (Val Town) receives the browser redirect from the OAuth provider and hands the code to this collector's `store_code` MCP tool. This two-part design works around Horizon proxying only POST traffic on the `/mcp/` path — browser GET redirects from OAuth providers cannot reach `@mcp.custom_route` endpoints, so a serverless callback bridges the gap.
+An unauthenticated "dumb mailbox" FastMCP server that holds OAuth2 authorization codes for retrieval by the originating MCP server. A companion Cloudflare Worker receives the browser redirect from the OAuth provider and hands the code to this collector's `store_code` MCP tool. This two-part design works around Horizon proxying only POST traffic on the `/mcp/` path — browser GET redirects from OAuth providers cannot reach `@mcp.custom_route` endpoints, so the Worker bridges the gap.
 
 ## How It Works
 
 ```
 ┌───────────────┐   1. redirect_uri → serverless    ┌──────────────────────┐
 │ OAuth Provider│ ─────────────────────────────────→│ Serverless callback  │
-│ (e.g. Schwab) │   GET ?code=AUTH_CODE&state=STATE  │ (Val Town)           │
+│ (e.g. Schwab) │   GET ?code=AUTH_CODE&state=STATE  │ (Cloudflare Worker)  │
 └───────────────┘                                    └──────────────────────┘
                                                                │
                                         2. POST store_code     │
@@ -33,12 +33,12 @@ An unauthenticated "dumb mailbox" FastMCP server that holds OAuth2 authorization
 
 1. **MCP server** starts an OAuth flow, setting `redirect_uri` to the serverless callback function's URL. Its `state` is `<patron npub>.<operator npub>` (the SDK's `pack_oauth_state`)
 2. **User** authorizes in the browser; the OAuth provider redirects to the serverless callback with `?code=...&state=...`
-3. **Serverless callback** (Val Town) POSTs the code to the collector's `store_code` MCP tool over `/mcp/`
+3. **Callback Worker** POSTs the code to the collector's `store_code` MCP tool over `/mcp/`
 4. **Collector** seals the code to the operator npub with NIP-44 (the SDK's `encrypt_collector_code`) and stores it in Postgres under the patron npub (600s TTL)
 5. **MCP server** calls the `retrieve_code(state=<patron npub>)` MCP tool to pick up the sealed code (one-time read, auto-deleted)
 6. **MCP server** opens the seal with its own nsec (`decrypt_collector_code`) and exchanges the code for a token using its own credentials
 
-The collector also exposes `collector_status` (pending-code count and TTL) and `service_status` (deployed build, incl. git sha) as free MCP tools. The serverless callback source lives in [`val/oauth_callback.js`](val/oauth_callback.js). A change to it on main deploys it to Val Town (`.github/workflows/deploy-val-town.yml`, which needs the `VALTOWN_TOKEN` secret).
+The collector also exposes `collector_status` (pending-code count and TTL) and `service_status` (deployed build, incl. git sha) as free MCP tools. The callback source lives in [`worker/oauth_callback.js`](worker/oauth_callback.js). A change to it on main deploys it to https://oauth.tollbooth-dpyc.com (`.github/workflows/deploy-worker.yml`, which needs the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` secrets).
 
 ## Deployment
 
@@ -66,7 +66,7 @@ No `OAUTH_COLLECTOR_URL` env var needed — peer discovery is handled by the reg
 Register the **serverless callback function's** URL (not the collector's) in your OAuth provider's developer portal. It is registered separately in the DPYC registry under the name `tollbooth-oauth2-callback`, and the SDK's `begin_oauth` uses it as the `redirect_uri`:
 ```python
 callback = await default_oracle_client().resolve_service(name="tollbooth-oauth2-callback")
-redirect_uri = callback["url"]  # e.g., "https://tollbooth-dpyc-oauth.val.run"
+redirect_uri = callback["url"]  # e.g., "https://oauth.tollbooth-dpyc.com"
 ```
 
 ## Security Model

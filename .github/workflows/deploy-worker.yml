@@ -1,0 +1,60 @@
+# Deploys the browser callback (worker/oauth_callback.js) as a Cloudflare Worker.
+#
+# The callback is the page OAuth providers redirect to. A change to it on main
+# deploys it to oauth.tollbooth-dpyc.com, then checks the page answers.
+#
+# Needs two repo secrets: CLOUDFLARE_API_TOKEN (Workers Scripts edit, plus
+# Workers Routes and DNS edit on the tollbooth-dpyc.com zone) and
+# CLOUDFLARE_ACCOUNT_ID.
+name: Deploy callback Worker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - worker/**
+      - .github/workflows/deploy-worker.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-worker
+  cancel-in-progress: false
+
+env:
+  CALLBACK_HOST: oauth.tollbooth-dpyc.com
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "26"
+
+      - name: Deploy
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: worker
+          command: deploy
+
+      - name: The callback answers
+        run: |
+          set -euo pipefail
+          # A request with no code or state must get the "Missing Parameters" page.
+          for attempt in 1 2 3 4 5 6; do
+            status=$(curl -s -o page.html -w "%{http_code}" "https://$CALLBACK_HOST/" || true)
+            if [ "$status" = 400 ] && grep -q "Missing Parameters" page.html; then
+              echo "https://$CALLBACK_HOST/ answers."
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::https://$CALLBACK_HOST/ answered $status without the expected page."
+          exit 1

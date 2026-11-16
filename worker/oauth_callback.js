@@ -1,8 +1,8 @@
 /**
  * Tollbooth OAuth2 Callback — serverless GET handler for OAuth provider redirects.
  *
- * Deployed as a Val Town HTTP val at:
- *   https://tollbooth-dpyc-oauth.val.run
+ * Deployed as a Cloudflare Worker at:
+ *   https://oauth.tollbooth-dpyc.com
  *
  * This function receives the browser GET redirect from an OAuth provider
  * (e.g., Schwab, Google) with ?code=...&state=... query parameters, then
@@ -111,7 +111,7 @@ function storedOk(body) {
   }
 }
 
-export default async function handler(req) {
+async function handler(req) {
   const url = new URL(req.url);
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
@@ -159,3 +159,5 @@ export default async function handler(req) {
     });
   }
 }
+
+export default { fetch: handler };
