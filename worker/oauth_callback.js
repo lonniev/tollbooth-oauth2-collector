@@ -1,0 +1,163 @@
+/**
+ * Tollbooth OAuth2 Callback — serverless GET handler for OAuth provider redirects.
+ *
+ * Deployed as a Cloudflare Worker at:
+ *   https://oauth.tollbooth-dpyc.com
+ *
+ * This function receives the browser GET redirect from an OAuth provider
+ * (e.g., Schwab, Google) with ?code=...&state=... query parameters, then
+ * forwards the code to the Tollbooth OAuth2 Collector's `store_code` MCP
+ * tool via a single JSON-RPC POST to the collector's /mcp/ endpoint.
+ *
+ * The collector seals the code to the operator's npub (NIP-44) and files it
+ * under the patron npub plus the flow's one-time secret. The originating MCP
+ * server later retrieves it via the collector's `retrieve_code` tool.
+ *
+ * The success page names the npub the account was linked to, so a person
+ * who approved someone else's link can see it went to an npub not theirs.
+ *
+ * Why this exists: Horizon only proxies POST traffic on
+ * the /mcp/ path. Browser GET redirects from OAuth providers cannot reach
+ * custom_route endpoints. This serverless function bridges the gap.
+ */
+
+const COLLECTOR_MCP_URL =
+  "https://tollbooth-oauth2-collector.fastmcp.app/mcp/";
+
+const NPUB = /^npub1[02-9ac-hj-np-z]{58}$/;
+
+function linkedNpubLine(state) {
+  const npub = state.split(".")[0];
+  if (!NPUB.test(npub)) return "";
+  const short = `${npub.slice(0, 12)}\u2026${npub.slice(-6)}`;
+  return `<p style="font-size:15px;line-height:1.5;color:#374151;margin:0 0 8px">
+This account is now linked to <strong><code>${short}</code></strong>.</p>
+<p style="font-size:14px;line-height:1.5;color:#b45309;margin:0 0 20px">
+If that is not your npub, tell the operator now.</p>`;
+}
+
+const SUCCESS_HTML = (linked) => `<!DOCTYPE html>
+<html><head><title>Authorization Code Received</title></head>
+<body style="font-family:system-ui,sans-serif;max-width:520px;margin:60px auto;
+text-align:center;color:#1a1a1a;padding:0 20px">
+<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;
+padding:40px 32px;box-shadow:0 1px 3px rgba(0,0,0,0.08)">
+<div style="font-size:48px;margin-bottom:16px">\u2705</div>
+<h1 style="font-size:22px;font-weight:600;margin:0 0 12px">
+Authorization Code Received &amp; Saved</h1>
+<p style="font-size:15px;line-height:1.5;color:#374151;margin:0 0 20px">
+Your authorization code has been securely encrypted for your identity
+and stored for retrieval.</p>
+${linked}
+<hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0">
+<p style="font-size:15px;line-height:1.5;color:#374151;margin:0 0 8px">
+You can close this tab and return to your agentic app
+(e.g.&nbsp;Claude&nbsp;Desktop, Claude&nbsp;Code).</p>
+<p style="font-size:14px;color:#6b7280;margin:0">
+The originating MCP server will automatically pick up the code.</p>
+</div>
+<div style="margin-top:28px;padding:20px 24px;background:#fafbfc;
+border:1px solid #e5e7eb;border-radius:10px;text-align:center">
+<a href="https://github.com/lonniev/dpyc-community" style="text-decoration:none">
+<img src="https://raw.githubusercontent.com/lonniev/dpyc-community/main/assets/dpyc-logo.png"
+alt="DPYC Tollbooth" style="height:40px;margin-bottom:10px"></a>
+<p style="font-size:13px;line-height:1.5;color:#374151;margin:0 0 6px">
+Powered by <strong>DPYC Tollbooth</strong> &mdash;
+<em>Don&rsquo;t Pester Your Customer</em></p>
+<p style="font-size:12px;line-height:1.4;color:#6b7280;margin:0 0 8px">
+Pre-funded Lightning micropayments for AI tool calls.
+No credit cards. No KYC. No interruptions.</p>
+<p style="font-size:12px;color:#9ca3af;margin:0">
+<a href="https://github.com/lonniev/dpyc-community" style="color:#2563eb;
+text-decoration:none">Community</a> &middot;
+<a href="https://dpyc-oracle.fastmcp.app/mcp" style="color:#2563eb;
+text-decoration:none">Oracle</a> &middot;
+<a href="https://github.com/lonniev/dpyc-community/blob/main/CREED.md"
+style="color:#2563eb;text-decoration:none">Creed</a></p>
+</div>
+<p style="font-size:12px;color:#9ca3af;margin-top:16px">
+\uD83D\uDD12 The code is encrypted at rest and can only be decrypted by the
+requesting identity.</p>
+</body></html>`;
+
+const ERROR_HTML = `<!DOCTYPE html>
+<html><head><title>Error</title></head>
+<body style="font-family:system-ui,sans-serif;max-width:480px;margin:80px auto;
+text-align:center">
+<h1>Missing Parameters</h1>
+<p>Both <code>code</code> and <code>state</code> query parameters are required.</p>
+</body></html>`;
+
+const FAIL_HTML = `<!DOCTYPE html>
+<html><head><title>Error</title></head>
+<body style="font-family:system-ui,sans-serif;max-width:480px;margin:80px auto;
+text-align:center">
+<h1>Not Saved</h1>
+<p>The authorization code was not saved. Start again from your agentic app.</p>
+</body></html>`;
+
+// The collector answers 200 even when it refuses a code; what it said is in the
+// tool result, as JSON or as the last `data:` line of an event stream.
+function storedOk(body) {
+  const lines = body.split("\n").filter((l) => l.startsWith("data:"));
+  const json = lines.length ? lines[lines.length - 1].slice(5) : body;
+  try {
+    const result = JSON.parse(json).result || {};
+    const answer = result.structuredContent ||
+      JSON.parse(((result.content || [])[0] || {}).text || "{}");
+    return answer.success === true;
+  } catch {
+    return false;
+  }
+}
+
+async function handler(req) {
+  const url = new URL(req.url);
+  const code = url.searchParams.get("code");
+  const state = url.searchParams.get("state");
+
+  if (!code || !state) {
+    return new Response(ERROR_HTML, {
+      status: 400,
+      headers: { "Content-Type": "text/html" },
+    });
+  }
+
+  try {
+    const resp = await fetch(COLLECTOR_MCP_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        method: "tools/call",
+        params: { name: "store_code", arguments: { code, state } },
+        id: 1,
+      }),
+    });
+
+    const body = await resp.text();
+    if (!resp.ok || !storedOk(body)) {
+      console.error(`Collector did not store the code (${resp.status}): ${body.slice(0, 300)}`);
+      return new Response(FAIL_HTML, {
+        status: 502,
+        headers: { "Content-Type": "text/html" },
+      });
+    }
+
+    return new Response(SUCCESS_HTML(linkedNpubLine(state)), {
+      status: 200,
+      headers: { "Content-Type": "text/html" },
+    });
+  } catch (err) {
+    console.error("Failed to call collector:", err);
+    return new Response(FAIL_HTML, {
+      status: 502,
+      headers: { "Content-Type": "text/html" },
+    });
+  }
+}
+
+export default { fetch: handler };
