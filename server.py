@@ -7,7 +7,7 @@ redirects from OAuth providers cannot reach custom_route endpoints.
 
 Architecture
 ~~~~~~~~~~~~
-* A lightweight **serverless HTTP function** (Val Town) receives the
+* A **Cloudflare Worker** (``worker/oauth_callback.js``) receives the
   browser GET redirect from the OAuth provider and calls the collector's
   ``store_code`` MCP tool via JSON-RPC over ``/mcp/``.
 * The originating MCP server calls ``retrieve_code`` (also an MCP tool)
