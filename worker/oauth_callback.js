@@ -37,7 +37,7 @@ If that is not your npub, tell the operator now.</p>`;
 }
 
 const SUCCESS_HTML = (linked) => `<!DOCTYPE html>
-<html><head><title>Authorization Code Received</title></head>
+<html><head><meta charset="utf-8"><title>Authorization Code Received</title></head>
 <body style="font-family:system-ui,sans-serif;max-width:520px;margin:60px auto;
 text-align:center;color:#1a1a1a;padding:0 20px">
 <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;
@@ -81,7 +81,7 @@ requesting identity.</p>
 </body></html>`;
 
 const ERROR_HTML = `<!DOCTYPE html>
-<html><head><title>Error</title></head>
+<html><head><meta charset="utf-8"><title>Error</title></head>
 <body style="font-family:system-ui,sans-serif;max-width:480px;margin:80px auto;
 text-align:center">
 <h1>Missing Parameters</h1>
@@ -89,7 +89,7 @@ text-align:center">
 </body></html>`;
 
 const FAIL_HTML = `<!DOCTYPE html>
-<html><head><title>Error</title></head>
+<html><head><meta charset="utf-8"><title>Error</title></head>
 <body style="font-family:system-ui,sans-serif;max-width:480px;margin:80px auto;
 text-align:center">
 <h1>Not Saved</h1>
@@ -119,7 +119,7 @@ async function handler(req) {
   if (!code || !state) {
     return new Response(ERROR_HTML, {
       status: 400,
-      headers: { "Content-Type": "text/html" },
+      headers: { "Content-Type": "text/html; charset=utf-8" },
     });
   }
 
@@ -143,19 +143,19 @@ async function handler(req) {
       console.error(`Collector did not store the code (${resp.status}): ${body.slice(0, 300)}`);
       return new Response(FAIL_HTML, {
         status: 502,
-        headers: { "Content-Type": "text/html" },
+        headers: { "Content-Type": "text/html; charset=utf-8" },
       });
     }
 
     return new Response(SUCCESS_HTML(linkedNpubLine(state)), {
       status: 200,
-      headers: { "Content-Type": "text/html" },
+      headers: { "Content-Type": "text/html; charset=utf-8" },
     });
   } catch (err) {
     console.error("Failed to call collector:", err);
     return new Response(FAIL_HTML, {
       status: 502,
-      headers: { "Content-Type": "text/html" },
+      headers: { "Content-Type": "text/html; charset=utf-8" },
     });
   }
 }

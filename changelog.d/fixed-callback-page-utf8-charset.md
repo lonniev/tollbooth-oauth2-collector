@@ -1,0 +1,1 @@
+- The callback pages declare UTF-8, so the ✅, the npub's ellipsis and the 🔒 render instead of mojibake (`âœ…`) in Safari.
