@@ -1,2 +1,0 @@
-- The browser callback moved from Val Town, which is shutting down, to a Cloudflare Worker at https://oauth.tollbooth-dpyc.com.
-- A change to `worker/oauth_callback.js` on main deploys it and checks the page answers. It needs the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repo secrets.
