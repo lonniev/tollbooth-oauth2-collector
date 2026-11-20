@@ -5,6 +5,25 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 Changes not yet released live in `changelog.d/`, one file per change — see the README there for why, and `scripts/changelog.py` for what folds them in at release time.
 
+## [0.2.13] — 2026-11-19
+
+### Changed
+
+- The browser callback moved from Val Town, which is shutting down, to a Cloudflare Worker at https://oauth.tollbooth-dpyc.com.
+- A change to `worker/oauth_callback.js` on main deploys it and checks the page answers. It needs the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repo secrets.
+
+- The MCP Registry listing carries a title (OAuth2 Authorization Code Collector) and a link to https://cafe.tollbooth-dpyc.com/products/oauth2-authorization-code-collector.
+
+### Fixed
+
+- The callback page says "Not Saved" when the collector refuses or fails to store a code. It used to say "Received & Saved" whenever the collector answered at all.
+
+- The callback pages declare UTF-8, so the ✅, the npub's ellipsis and the 🔒 render instead of mojibake (`âœ…`) in Safari.
+
+### Security
+
+- A code is filed under the patron npub plus the flow's one-time secret from the OAuth `state`, and a state without a secret is refused. A link someone else built with a patron's npub can no longer deliver their account into that patron's session. The callback page names the npub the account was linked to.
+
 ## [0.2.12] — 2026-10-21
 
 ### Changed
