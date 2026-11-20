@@ -1,7 +1,9 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.lonniev/tollbooth-oauth2-collector",
+  "title": "OAuth2 Authorization Code Collector",
   "description": "Unauthenticated OAuth2 callback collector for Tollbooth MCP services",
+  "websiteUrl": "https://cafe.tollbooth-dpyc.com/products/oauth2-authorization-code-collector",
   "version": "0.2.12",
   "repository": {
     "url": "https://github.com/lonniev/tollbooth-oauth2-collector",
