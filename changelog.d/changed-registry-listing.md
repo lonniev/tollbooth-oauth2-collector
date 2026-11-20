@@ -1,0 +1,1 @@
+- The MCP Registry listing carries a title (OAuth2 Authorization Code Collector) and a link to https://cafe.tollbooth-dpyc.com/products/oauth2-authorization-code-collector.
