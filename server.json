@@ -4,7 +4,7 @@
   "title": "OAuth2 Authorization Code Collector",
   "description": "Unauthenticated OAuth2 callback collector for Tollbooth MCP services",
   "websiteUrl": "https://cafe.tollbooth-dpyc.com/products/oauth2-authorization-code-collector",
-  "version": "0.2.14",
+  "version": "0.2.15",
   "repository": {
     "url": "https://github.com/lonniev/tollbooth-oauth2-collector",
     "source": "github"
